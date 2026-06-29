@@ -50,7 +50,7 @@ def login():
     print("Login OK | Token:", access_token[:30], "...")
     return True
 
-# ── Lấy danh sách + học kì mới nhất từ web (ds_hoc_ky) ────────────────────────
+# ── Lấy danh sách học kỳ + ngày bắt đầu ───────────────────────────────────────
 def get_hocky_list():
     resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={})
     return resp.json()["data"]["ds_hoc_ky"]
@@ -60,20 +60,37 @@ def get_latest_hocky():
     latest = max(ds, key=lambda hk: hk["hoc_ky"])
     print(f"Mới nhất trên web: {latest['hoc_ky']} - {latest['ten_hoc_ky']} "
           f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
-    return latest["hoc_ky"]
+    return latest
 
-# ── Lấy TKB toàn học kì ───────────────────────────────────────────────────────
-def get_tkb(hoc_ky_id):
+# ── Lấy khung giờ tiết (nếu API mới không trả) ───────────────────────────────
+def get_tiet_map():
+    # Thử lấy từ API cũ — chỉ cần gọi 1 lần để lấy ds_tiet_trong_ngay
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbtuanusertheohocky", json={
-        "filter": {"hoc_ky": hoc_ky_id, "ten_hoc_ky": ""},
+        "filter": {"hoc_ky": "20261", "ten_hoc_ky": ""},
+        "additional": {
+            "paging": {"limit": 1, "page": 1},
+            "ordering": [{"name": None, "order_type": None}]
+        }
+    })
+    data = resp.json().get("data", {})
+    tiet_map = {t["tiet"]: (t["gio_bat_dau"], t["gio_ket_thuc"])
+                for t in data.get("ds_tiet_trong_ngay", [])}
+    if tiet_map:
+        print(f"Loaded {len(tiet_map)} time slots from fallback API")
+    return tiet_map
+
+# ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
+def get_tkb_hocky(hoc_ky_id):
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json={
+        "filter": {"hoc_ky": hoc_ky_id},
         "additional": {
             "paging": {"limit": 100, "page": 1},
             "ordering": [{"name": None, "order_type": None}]
         }
     })
-    return resp.json()["data"]
+    return resp.json().get("data", {})
 
-# ── Lấy lịch thi ─────────────────────────────────────────────────────────────
+# ── Lấy lịch thi (giữ nguyên endpoint cũ) ────────────────────────────────────
 def get_exams(hoc_ky_id):
     resp = S.post(f"{BASE_URL}/api/epm/w-locdslichthisvtheohocky", json={
         "filter": {"hoc_ky": hoc_ky_id, "is_giua_ky": False},
@@ -82,13 +99,10 @@ def get_exams(hoc_ky_id):
             "ordering": [{"name": None, "order_type": None}]
         }
     })
-    return resp.json()["data"]
+    return resp.json().get("data", {})
 
-# ── Build TKB .ics ────────────────────────────────────────────────────────────
-def build_ics(data):
-    tiet_map = {t["tiet"]: (t["gio_bat_dau"], t["gio_ket_thuc"])
-                for t in data["ds_tiet_trong_ngay"]}
-
+# ── Build TKB .ics từ dạng học kỳ (bitmap) ───────────────────────────────────
+def build_ics(data, hoc_ky_info, tiet_map):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Schedule//VN")
     cal.add("version", "2.0")
@@ -96,40 +110,84 @@ def build_ics(data):
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
 
     now_utc = datetime.now(tz=timezone.utc)
-    count   = 0
+    count = 0
 
-    for tuan in data["ds_tuan_tkb"]:
-        for tkb in tuan["ds_thoi_khoa_bieu"]:
-            if tkb.get("is_nghi_day"):
+    # Ngày bắt đầu học kỳ → tìm Thứ 2 tuần 1
+    start_str = hoc_ky_info.get("ngay_bat_dau_hk", "")
+    if not start_str:
+        print("Warning: Không có ngày bắt đầu học kỳ")
+        return cal.to_ical()
+
+    start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
+    monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
+
+    # Trích danh sách TKB
+    ds = data.get("ds_tkb_hoc_ky") or data.get("data") or data
+    if isinstance(ds, dict):
+        ds = list(ds.values())
+    if not isinstance(ds, list):
+        print(f"Warning: ds_tkb kiểu {type(ds)}")
+        return cal.to_ical()
+
+    for tkb in ds:
+        try:
+            bitmap = str(tkb.get("thoi_gian_hoc") or tkb.get("tuan_hoc") or "").strip()
+            if not bitmap:
                 continue
 
-            tiet_bd = tkb["tiet_bat_dau"]
-            tiet_kt = tiet_bd + tkb["so_tiet"] - 1
+            thu = int(tkb.get("thu", 0))
+            if thu < 2 or thu > 8:
+                continue
+
+            tiet_bd = int(tkb.get("tiet_bat_dau", 0))
+            so_tiet = int(tkb.get("so_tiet", 0))
+            tiet_kt = tiet_bd + so_tiet - 1
+
+            if not tiet_map or tiet_bd not in tiet_map:
+                continue
+
             tiet_kt = min(tiet_kt, max(tiet_map.keys()))
 
-            if tiet_bd not in tiet_map:
-                continue
+            # thu=2 (Mon) → offset 0, thu=8 (Sun) → offset 6
+            dow_offset = thu - 2
 
-            ngay     = datetime.fromisoformat(tkb["ngay_hoc"]).date()
-            dt_start = datetime.strptime(f"{ngay} {tiet_map[tiet_bd][0]}", "%Y-%m-%d %H:%M")
-            dt_end   = datetime.strptime(f"{ngay} {tiet_map[tiet_kt][1]}", "%Y-%m-%d %H:%M")
+            ten_mon = tkb.get("ten_mon", "") or tkb.get("ten_mon_hoc", "Môn học")
+            phong_raw = str(tkb.get("phong", "") or tkb.get("ma_phong", ""))
+            phong = phong_raw.split("-")[0].strip()
+            gv = tkb.get("ten_giang_vien", "") or tkb.get("gv", "")
+            nhom = tkb.get("nhom_to", "") or tkb.get("ma_nhom", "")
 
-            phong = tkb["ma_phong"].split("-")[0].strip()
+            for week_idx, char in enumerate(bitmap):
+                if char == "-":
+                    continue
 
-            ev = Event()
-            ev.add("dtstamp",     now_utc)
-            ev.add("uid",         str(uuid.uuid4()))
-            ev.add("summary",     tkb["ten_mon"])
-            ev.add("dtstart",     dt_start)
-            ev.add("dtend",       dt_end)
-            ev.add("location",    phong)
-            ev.add("description", (
-                f"GV: {tkb['ten_giang_vien']}\n"
-                f"{phong}\n"
-                f"Tiết {tiet_bd}–{tiet_kt} | Nhóm {tkb['ma_nhom']}"
-            ))
-            cal.add_component(ev)
-            count += 1
+                week_num = week_idx + 1
+                event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
+
+                dt_start = datetime.strptime(
+                    f"{event_date} {tiet_map[tiet_bd][0]}", "%Y-%m-%d %H:%M")
+                dt_end = datetime.strptime(
+                    f"{event_date} {tiet_map[tiet_kt][1]}", "%Y-%m-%d %H:%M")
+
+                ev = Event()
+                ev.add("dtstamp", now_utc)
+                ev.add("uid", str(uuid.uuid4()))
+                ev.add("summary", ten_mon)
+                ev.add("dtstart", dt_start)
+                ev.add("dtend", dt_end)
+                ev.add("location", phong)
+                ev.add("description", (
+                    f"GV: {gv}\n"
+                    f"{phong}\n"
+                    f"Tiết {tiet_bd}–{tiet_kt} | Nhóm {nhom}\n"
+                    f"Tuần {week_num}"
+                ))
+                cal.add_component(ev)
+                count += 1
+
+        except Exception as e:
+            print(f"Skip TKB entry: {e} | data: {tkb}")
+            continue
 
     print(f"TKB: {count} sự kiện")
     return cal.to_ical()
@@ -143,9 +201,8 @@ def build_exam_ics(data):
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
 
     now_utc = datetime.now(tz=timezone.utc)
-    count   = 0
+    count = 0
 
-    # Trích xuất an toàn — API đôi khi trả số hoặc dict rỗng
     ds = None
     if isinstance(data, dict):
         ds = data.get("ds_lich_thi")
@@ -181,12 +238,12 @@ def build_exam_ics(data):
             if phong_str:                desc_parts.append(phong_str)
 
             ev = Event()
-            ev.add("dtstamp",     now_utc)
-            ev.add("uid",         str(uuid.uuid4()))
-            ev.add("summary",     f"CK-{ten_mon}")
-            ev.add("dtstart",     dt_start)
-            ev.add("dtend",       dt_end)
-            ev.add("location",    phong_str)
+            ev.add("dtstamp", now_utc)
+            ev.add("uid", str(uuid.uuid4()))
+            ev.add("summary", f"🔴 THI: {ten_mon}")
+            ev.add("dtstart", dt_start)
+            ev.add("dtend", dt_end)
+            ev.add("location", phong_str)
             ev.add("description", "\n".join(desc_parts))
             cal.add_component(ev)
             count += 1
@@ -203,17 +260,26 @@ if __name__ == "__main__":
     hk_override = os.environ.get("HOC_KY_ID", "").strip()
 
     if hk_override:
-        hk_id = hk_override
-        print(f"Học kì: {hk_id} (chỉ định)")
+        # Nếu override chỉ có mã, lấy info từ list
+        ds_hk = get_hocky_list()
+        hk_info = next((h for h in ds_hk if str(h["hoc_ky"]) == hk_override), None)
+        if not hk_info:
+            hk_info = {"hoc_ky": hk_override, "ngay_bat_dau_hk": "", "ten_hoc_ky": ""}
+        print(f"Học kì: {hk_override} (chỉ định)")
     else:
-        hk_id = get_latest_hocky()
-        print(f"Học kì: {hk_id} (mới nhất trên web)")
+        hk_info = get_latest_hocky()
+
+    hk_id = hk_info["hoc_ky"]
+    print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
+
+    # Lấy khung giờ tiết trước
+    tiet_map = get_tiet_map()
 
     os.makedirs("docs", exist_ok=True)
 
-    tkb_data = get_tkb(hk_id)
+    tkb_data = get_tkb_hocky(hk_id)
     with open(OUTPUT_TKB, "wb") as f:
-        f.write(build_ics(tkb_data))
+        f.write(build_ics(tkb_data, hk_info, tiet_map))
     print(f"Saved: {OUTPUT_TKB}")
 
     exam_data = get_exams(hk_id)
