@@ -200,7 +200,7 @@ def build_ics(all_entries, cal_name):
                     dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
                     dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
 
-                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
+                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}|v2"  # Thêm |v2
                     uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
                     ev = Event()
