@@ -166,13 +166,22 @@ def build_ics(all_entries, cal_name):
                 if thu < 2 or thu > 8:
                     continue
 
-                tbd = int(tkb.get("tbd", 0))
-                so_tiet = int(tkb.get("so_tiet", 0))
+                # Ép kiểu int để chắc chắn
+                tbd_raw = tkb.get("tbd", 0)
+                so_tiet_raw = tkb.get("so_tiet", 0)
+                try:
+                    tbd = int(tbd_raw)
+                    so_tiet = int(so_tiet_raw)
+                except (ValueError, TypeError):
+                    print(f"DEBUG skip: tbd={tbd_raw} so_tiet={so_tiet_raw}")
+                    continue
+
                 if tbd <= 0 or so_tiet <= 0:
                     continue
 
                 tiet_kt = tbd + so_tiet - 1
                 if tbd not in TIET_GIO or tiet_kt not in TIET_GIO:
+                    print(f"DEBUG skip: tbd={tbd} tiet_kt={tiet_kt} out of range")
                     continue
 
                 # Lấy giờ bắt đầu tiết đầu, giờ kết thúc tiết cuối
