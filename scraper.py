@@ -136,7 +136,7 @@ def build_ics(data, hoc_ky_info, tiet_map):
     start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
     monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
 
-    # Trích danh sách TKB — thử nhiều key
+    # Trích danh sách TKB
     ds = None
     if isinstance(data, dict):
         for key in ["ds_tkb_hoc_ky", "ds_thoi_khoa_bieu", "ds_tkb", "data", "items", "rows", "result"]:
@@ -161,7 +161,6 @@ def build_ics(data, hoc_ky_info, tiet_map):
 
     for tkb in ds:
         try:
-            # Bitmap tuần
             bitmap = str(tkb.get("thoi_gian_hoc") or tkb.get("tuan_hoc") or tkb.get("thoi_gian") or "").strip()
             if not bitmap:
                 continue
@@ -181,7 +180,7 @@ def build_ics(data, hoc_ky_info, tiet_map):
                 continue
             tiet_kt = min(tiet_kt, max(tiet_map.keys()))
 
-            dow_offset = thu - 2  # thu=2 (Mon) → 0
+            dow_offset = thu - 2
 
             ten_mon = tkb.get("ten_mon") or tkb.get("ten_mon_hoc") or tkb.get("mon_hoc") or "Môn học"
             phong_raw = str(tkb.get("phong") or tkb.get("ma_phong") or tkb.get("phong_hoc") or "")
@@ -291,15 +290,11 @@ if __name__ == "__main__":
     if not user_data:
         raise SystemExit("Login thất bại")
 
-    # Luôn lấy học kỳ mới nhất từ web
     hk_info = get_latest_hocky()
     hk_id = hk_info["hoc_ky"]
     print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
 
-    # Lấy khung giờ tiết trước
     tiet_map = get_tiet_map()
-
-    # Lấy TKB dạng học kỳ (loai_doi_tuong=1 = cá nhân)
     tkb_data = get_tkb_hocky(hk_id)
 
     os.makedirs("docs", exist_ok=True)
