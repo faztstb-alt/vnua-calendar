@@ -183,7 +183,7 @@ def build_exam_ics(data):
             ev = Event()
             ev.add("dtstamp",     now_utc)
             ev.add("uid",         str(uuid.uuid4()))
-            ev.add("summary",     f"🔴 THI: {ten_mon}")
+            ev.add("summary",     f"CK-{ten_mon}")
             ev.add("dtstart",     dt_start)
             ev.add("dtend",       dt_end)
             ev.add("location",    phong_str)
