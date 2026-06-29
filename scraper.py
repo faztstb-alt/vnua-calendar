@@ -15,6 +15,23 @@ PASSWORD    = os.environ.get("SCHOOL_PASS", "")
 OUTPUT_TKB  = "docs/schedule.ics"
 OUTPUT_EXAM = "docs/exams.ics"
 
+# Bảng giờ tiết VNUA (tiết bắt đầu, tiết kết thúc)
+TIET_GIO = {
+    1:  ("07:00", "07:50"),
+    2:  ("07:55", "08:45"),
+    3:  ("08:50", "09:40"),
+    4:  ("09:55", "10:45"),
+    5:  ("10:50", "11:40"),
+    6:  ("12:45", "13:35"),
+    7:  ("13:40", "14:30"),
+    8:  ("14:35", "15:25"),
+    9:  ("15:40", "16:30"),
+    10: ("16:35", "17:25"),
+    11: ("18:00", "18:50"),
+    12: ("18:55", "19:45"),
+    13: ("19:50", "20:40"),
+}
+
 S = requests.Session()
 S.headers.update({
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
@@ -123,7 +140,8 @@ def build_ics(all_entries, cal_name):
     cal.add("METHOD", "PUBLISH")
 
     now_utc = datetime.now(tz=timezone.utc)
-    count = 0
+    total_count = 0
+    per_hk = {}
 
     for entry in all_entries:
         try:
@@ -131,11 +149,13 @@ def build_ics(all_entries, cal_name):
             hk_info  = entry.get("hk_info", {})
             start_str = hk_info.get("ngay_bat_dau_hk", "")
             if not start_str:
+                print(f"DEBUG: HK {hk_info.get('hoc_ky','?')} skip — no start date")
                 continue
 
             start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
             monday_w1 = start_date - timedelta(days=start_date.weekday())
-            hk_id = hk_info.get("hoc_ky", "")
+            hk_id = hk_info.get("hoc_ky", "unknown")
+            per_hk[hk_id] = 0
 
             for tkb in tkb_list:
                 bitmap = str(tkb.get("tkb", "")).strip()
@@ -146,17 +166,23 @@ def build_ics(all_entries, cal_name):
                 if thu < 2 or thu > 8:
                     continue
 
-                tu_gio = tkb.get("tu_gio", "")
-                den_gio = tkb.get("den_gio", "")
-                if not tu_gio or not den_gio:
+                tbd = int(tkb.get("tbd", 0))
+                so_tiet = int(tkb.get("so_tiet", 0))
+                if tbd <= 0 or so_tiet <= 0:
                     continue
+
+                tiet_kt = tbd + so_tiet - 1
+                if tbd not in TIET_GIO or tiet_kt not in TIET_GIO:
+                    continue
+
+                # Lấy giờ bắt đầu tiết đầu, giờ kết thúc tiết cuối
+                tu_gio = TIET_GIO[tbd][0]
+                den_gio = TIET_GIO[tiet_kt][1]
 
                 ten_mon = tkb.get("ten_mon", "Môn học")
                 phong = str(tkb.get("phong", "")).strip()
                 gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
                 nhom = tkb.get("nhom_to", "")
-                tbd = int(tkb.get("tbd", 0))
-                so_tiet = int(tkb.get("so_tiet", 0))
                 ma_mon = tkb.get("ma_mon", "")
 
                 dow_offset = thu - 2
@@ -184,18 +210,20 @@ def build_ics(all_entries, cal_name):
                     ev.add("description", (
                         f"GV: {gv}\n"
                         f"{phong}\n"
-                        f"Tiết {tbd}–{tbd + so_tiet - 1} | Nhóm {nhom}\n"
+                        f"Tiết {tbd}–{tiet_kt} | Nhóm {nhom}\n"
                         f"Tuần {week_num} | HK {hk_id}"
                     ))
                     ev.add("sequence", 0)
                     cal.add_component(ev)
-                    count += 1
+                    total_count += 1
+                    per_hk[hk_id] += 1
 
         except Exception as e:
             print(f"Skip entry: {e}")
             continue
 
-    print(f"Total TKB: {count} sự kiện")
+    print(f"DEBUG TKB per HK: {per_hk}")
+    print(f"Total TKB: {total_count} sự kiện")
     return cal.to_ical()
 
 # ── Build Exam .ics từ tất cả học kỳ ─────────────────────────────────────────
@@ -209,6 +237,7 @@ def build_exam_ics(all_exams):
 
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
+    per_hk = {}
 
     for thi in all_exams:
         try:
@@ -217,7 +246,13 @@ def build_exam_ics(all_exams):
             ten_mon   = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
             phong_thi = thi.get("phong_thi") or thi.get("ma_phong") or ""
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
-            hk_id     = thi.get("hoc_ky", "")
+            hk_id     = thi.get("hoc_ky", "unknown")
+
+            if hk_id not in per_hk:
+                per_hk[hk_id] = 0
+
+            if not ngay_thi:
+                continue
 
             ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
@@ -241,9 +276,11 @@ def build_exam_ics(all_exams):
             ev.add("sequence", 0)
             cal.add_component(ev)
             count += 1
+            per_hk[hk_id] += 1
         except Exception as e:
             print(f"Skip exam entry: {e} | data: {thi}")
 
+    print(f"DEBUG Exam per HK: {per_hk}")
     print(f"Total Lịch thi: {count} sự kiện")
     return cal.to_ical()
 
@@ -256,8 +293,8 @@ if __name__ == "__main__":
     ds_hk = get_hocky_list()
     print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
 
-    all_tkb_entries = []   # [{hk_info, tkb_list}, ...]
-    all_exams = []         # [exam, ...]
+    all_tkb_entries = []
+    all_exams = []
 
     for hk in ds_hk:
         hk_id = hk["hoc_ky"]
