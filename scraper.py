@@ -6,7 +6,7 @@ pip install requests icalendar
 import os, json, base64, uuid, hashlib
 import requests
 from datetime import datetime, timezone, timedelta
-from icalendar import Calendar, Event
+from icalendar import Calendar, Event, Timezone, TimezoneStandard
 
 BASE_URL    = "https://daotao.vnua.edu.vn"
 USERNAME    = os.environ.get("SCHOOL_USER", "")
@@ -117,6 +117,21 @@ def get_exams(hoc_ky_id):
     print(f"  HK {hoc_ky_id}: {len(ds)} exam items")
     return ds
 
+# ── Tạo VTIMEZONE component ───────────────────────────────────────────────────
+def make_vn_timezone():
+    """Tạo VTIMEZONE component cho Asia/Ho_Chi_Minh (UTC+7, không DST)"""
+    tz = Timezone()
+    tz.add("tzid", "Asia/Ho_Chi_Minh")
+
+    tzstd = TimezoneStandard()
+    tzstd.add("dtstart", datetime(1970, 1, 1, 0, 0, 0))
+    tzstd.add("tzoffsetfrom", "+0700")
+    tzstd.add("tzoffsetto", "+0700")
+    tzstd.add("tzname", "ICT")  # Indochina Time
+    tz.add_component(tzstd)
+
+    return tz
+
 # ── Build TKB .ics ──────────────────────────────────────────────────────────
 def build_ics(all_entries, cal_name):
     cal = Calendar()
@@ -125,6 +140,9 @@ def build_ics(all_entries, cal_name):
     cal.add("X-WR-CALNAME", cal_name)
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
     cal.add("METHOD", "PUBLISH")
+
+    # THÊM VTIMEZONE - BẮT BUỘC để Google Calendar hiểu đúng timezone
+    cal.add_component(make_vn_timezone())
 
     now_utc = datetime.now(tz=timezone.utc)
     total_count = 0
@@ -187,8 +205,14 @@ def build_ics(all_entries, cal_name):
                     week_num = week_idx + 1
                     event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
 
+                    # Tạo datetime với timezone Asia/Ho_Chi_Minh
                     dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
                     dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
+
+                    # Gắn timezone cho datetime object
+                    vn_tz = timezone(timedelta(hours=7))
+                    dt_start = dt_start.replace(tzinfo=vn_tz)
+                    dt_end = dt_end.replace(tzinfo=vn_tz)
 
                     uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
                     uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
@@ -197,6 +221,7 @@ def build_ics(all_entries, cal_name):
                     ev.add("dtstamp", now_utc)
                     ev.add("uid", uid)
                     ev.add("summary", ten_mon)
+                    # icalendar sẽ tự động thêm TZID khi datetime có tzinfo
                     ev.add("dtstart", dt_start)
                     ev.add("dtend", dt_end)
                     ev.add("location", phong)
@@ -228,6 +253,9 @@ def build_exam_ics(all_exams):
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
     cal.add("METHOD", "PUBLISH")
 
+    # THÊM VTIMEZONE cho lịch thi luôn
+    cal.add_component(make_vn_timezone())
+
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
     per_hk = {}
@@ -250,6 +278,11 @@ def build_exam_ics(all_exams):
             ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
             dt_end   = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
+
+            # Gắn timezone
+            vn_tz = timezone(timedelta(hours=7))
+            dt_start = dt_start.replace(tzinfo=vn_tz)
+            dt_end = dt_end.replace(tzinfo=vn_tz)
 
             uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{gio_bd}|{hk_id}"
             uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
