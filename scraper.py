@@ -89,7 +89,16 @@ def get_tkb_hocky(hoc_ky_id):
             "ordering": [{"name": None, "order_type": None}]
         }
     })
-    return resp.json().get("data", {})
+    raw = resp.json()
+    print(f"DEBUG w-locdstkbhockytheodoituong keys: {list(raw.keys())}")
+    data = raw.get("data", {})
+    if isinstance(data, dict):
+        print(f"DEBUG data keys: {list(data.keys())}")
+    elif isinstance(data, list):
+        print(f"DEBUG data is list, len={len(data)}")
+    else:
+        print(f"DEBUG data type: {type(data)}")
+    return data
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
 def get_exams(hoc_ky_id):
@@ -122,41 +131,58 @@ def build_ics(data, hoc_ky_info, tiet_map):
     start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
     monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
 
-    # Trích danh sách TKB
-    ds = data.get("ds_tkb_hoc_ky") or data.get("data") or data
+    # Trích danh sách TKB — thử nhiều key phổ biến
+    ds = None
+    if isinstance(data, dict):
+        for key in ["ds_tkb_hoc_ky", "ds_thoi_khoa_bieu", "ds_tkb", "data", "items", "rows"]:
+            if key in data:
+                ds = data[key]
+                print(f"DEBUG using data['{key}']")
+                break
+    if ds is None:
+        ds = data
+
     if isinstance(ds, dict):
         ds = list(ds.values())
+        print(f"DEBUG flattened dict values, len={len(ds)}")
     if not isinstance(ds, list):
-        print(f"Warning: ds_tkb kiểu {type(ds)}")
+        print(f"Warning: ds_tkb kiểu {type(ds)} — cannot iterate")
         return cal.to_ical()
+
+    print(f"DEBUG total entries before filter: {len(ds)}")
+    if ds:
+        print(f"DEBUG first entry keys: {list(ds[0].keys()) if isinstance(ds[0], dict) else type(ds[0])}")
+        print(f"DEBUG first entry sample: {json.dumps(ds[0], ensure_ascii=False, default=str)[:300]}")
 
     for tkb in ds:
         try:
-            bitmap = str(tkb.get("thoi_gian_hoc") or tkb.get("tuan_hoc") or "").strip()
+            # Bitmap tuần
+            bitmap = str(tkb.get("thoi_gian_hoc") or tkb.get("tuan_hoc") or tkb.get("thoi_gian") or "").strip()
             if not bitmap:
                 continue
 
-            thu = int(tkb.get("thu", 0))
+            thu_raw = tkb.get("thu") or tkb.get("thu_trong_tuan") or tkb.get("ngay_hoc")
+            thu = int(thu_raw) if thu_raw is not None else 0
             if thu < 2 or thu > 8:
                 continue
 
-            tiet_bd = int(tkb.get("tiet_bat_dau", 0))
-            so_tiet = int(tkb.get("so_tiet", 0))
+            tiet_bd = int(tkb.get("tiet_bat_dau") or tkb.get("tiet_bd") or 0)
+            so_tiet = int(tkb.get("so_tiet") or tkb.get("so_tiet_hoc") or 0)
+            if tiet_bd <= 0 or so_tiet <= 0:
+                continue
             tiet_kt = tiet_bd + so_tiet - 1
 
             if not tiet_map or tiet_bd not in tiet_map:
                 continue
-
             tiet_kt = min(tiet_kt, max(tiet_map.keys()))
 
-            # thu=2 (Mon) → offset 0, thu=8 (Sun) → offset 6
-            dow_offset = thu - 2
+            dow_offset = thu - 2  # thu=2 (Mon) → 0
 
-            ten_mon = tkb.get("ten_mon", "") or tkb.get("ten_mon_hoc", "Môn học")
-            phong_raw = str(tkb.get("phong", "") or tkb.get("ma_phong", ""))
+            ten_mon = tkb.get("ten_mon") or tkb.get("ten_mon_hoc") or tkb.get("mon_hoc") or "Môn học"
+            phong_raw = str(tkb.get("phong") or tkb.get("ma_phong") or tkb.get("phong_hoc") or "")
             phong = phong_raw.split("-")[0].strip()
-            gv = tkb.get("ten_giang_vien", "") or tkb.get("gv", "")
-            nhom = tkb.get("nhom_to", "") or tkb.get("ma_nhom", "")
+            gv = tkb.get("ten_giang_vien") or tkb.get("giang_vien") or tkb.get("gv") or ""
+            nhom = tkb.get("nhom_to") or tkb.get("ma_nhom") or tkb.get("nhom") or ""
 
             for week_idx, char in enumerate(bitmap):
                 if char == "-":
@@ -258,17 +284,8 @@ def build_exam_ics(data):
 if __name__ == "__main__":
     assert login(), "Login thất bại"
 
-    hk_override = os.environ.get("HOC_KY_ID", "").strip()
-
-    if hk_override:
-        ds_hk = get_hocky_list()
-        hk_info = next((h for h in ds_hk if str(h["hoc_ky"]) == hk_override), None)
-        if not hk_info:
-            hk_info = {"hoc_ky": hk_override, "ngay_bat_dau_hk": "", "ten_hoc_ky": ""}
-        print(f"Học kì: {hk_override} (chỉ định)")
-    else:
-        hk_info = get_latest_hocky()
-
+    # Luôn lấy học kỳ mới nhất từ web, bỏ input override
+    hk_info = get_latest_hocky()
     hk_id = hk_info["hoc_ky"]
     print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
 
