@@ -62,41 +62,6 @@ def get_latest_hocky():
           f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
     return latest
 
-# ── Lấy đối tượng TKB (sinh viên/lớp) theo học kỳ ───────────────────────────
-def get_doi_tuong(hoc_ky_id):
-    resp = S.post(f"{BASE_URL}/api/sch/w-locdsdoituongthoikhoabieuhocky", json={
-        "filter": {"hoc_ky": hoc_ky_id},
-        "additional": {
-            "paging": {"limit": 100, "page": 1},
-            "ordering": [{"name": None, "order_type": None}]
-        }
-    })
-    raw = resp.json()
-    print(f"DEBUG w-locdsdoituongthoikhoabieuhocky keys: {list(raw.keys())}")
-    data = raw.get("data", {})
-    if isinstance(data, dict):
-        print(f"DEBUG data keys: {list(data.keys())}")
-        # Thử nhiều key chứa danh sách đối tượng
-        for key in ["ds_doituong", "ds_doi_tuong", "doituong", "items", "data"]:
-            if key in data:
-                ds = data[key]
-                if isinstance(ds, list) and ds:
-                    print(f"DEBUG found {len(ds)} objects via '{key}'")
-                    # Ưu tiên cái đang chọn (is_chon), hoặc lấy cái đầu
-                    chosen = next((x for x in ds if x.get("is_chon") or x.get("is_selected")), ds[0])
-                    print(f"DEBUG chosen: {json.dumps(chosen, ensure_ascii=False, default=str)}")
-                    return chosen
-                elif isinstance(ds, dict):
-                    print(f"DEBUG single object via '{key}'")
-                    return ds
-    elif isinstance(data, list) and data:
-        print(f"DEBUG data is list, len={len(data)}")
-        chosen = next((x for x in data if x.get("is_chon") or x.get("is_selected")), data[0])
-        return chosen
-
-    print("ERROR: Không lấy được đối tượng TKB")
-    return None
-
 # ── Lấy khung giờ tiết (fallback từ API tuần cũ) ───────────────────────────────
 def get_tiet_map():
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbtuanusertheohocky", json={
@@ -116,18 +81,13 @@ def get_tiet_map():
     return tiet_map
 
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
-def get_tkb_hocky(hoc_ky_id, doi_tuong):
-    if not doi_tuong:
-        return {}
-
-    loai = doi_tuong.get("loai_doi_tuong") or "SV"
-    ma   = doi_tuong.get("ma_doi_tuong") or doi_tuong.get("ma") or doi_tuong.get("ma_sinh_vien") or USERNAME
-
+def get_tkb_hocky(hoc_ky_id):
+    # loai_doi_tuong: 1 = TKB cá nhân, ma_doi_tuong = mã sinh viên
     body = {
         "filter": {
             "hoc_ky": hoc_ky_id,
-            "loai_doi_tuong": loai,
-            "ma_doi_tuong": ma,
+            "loai_doi_tuong": 1,
+            "ma_doi_tuong": USERNAME,
         },
         "additional": {
             "paging": {"limit": 100, "page": 1},
@@ -176,7 +136,7 @@ def build_ics(data, hoc_ky_info, tiet_map):
     start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
     monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
 
-    # Trích danh sách TKB
+    # Trích danh sách TKB — thử nhiều key
     ds = None
     if isinstance(data, dict):
         for key in ["ds_tkb_hoc_ky", "ds_thoi_khoa_bieu", "ds_tkb", "data", "items", "rows", "result"]:
@@ -336,14 +296,11 @@ if __name__ == "__main__":
     hk_id = hk_info["hoc_ky"]
     print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
 
-    # Lấy đối tượng (sinh viên/lớp) cho học kỳ này
-    doi_tuong = get_doi_tuong(hk_id)
-
     # Lấy khung giờ tiết trước
     tiet_map = get_tiet_map()
 
-    # Lấy TKB dạng học kỳ
-    tkb_data = get_tkb_hocky(hk_id, doi_tuong)
+    # Lấy TKB dạng học kỳ (loai_doi_tuong=1 = cá nhân)
+    tkb_data = get_tkb_hocky(hk_id)
 
     os.makedirs("docs", exist_ok=True)
 
