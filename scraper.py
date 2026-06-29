@@ -113,7 +113,7 @@ def get_exams(hoc_ky_id):
     print(f"  HK {hoc_ky_id}: {len(ds)} exam items")
     return ds
 
-# ── Build TKB .ics từ dạng học kỳ (bitmap) ───────────────────────────────────
+# ── Build TKB .ics từ tất cả học kỳ ──────────────────────────────────────────
 def build_ics(all_entries, cal_name):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Schedule//VN")
@@ -198,7 +198,7 @@ def build_ics(all_entries, cal_name):
     print(f"Total TKB: {count} sự kiện")
     return cal.to_ical()
 
-# ── Build Exam .ics ───────────────────────────────────────────────────────────
+# ── Build Exam .ics từ tất cả học kỳ ─────────────────────────────────────────
 def build_exam_ics(all_exams):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Exams//VN")
