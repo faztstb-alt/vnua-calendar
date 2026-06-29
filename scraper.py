@@ -125,8 +125,9 @@ def make_vn_timezone():
 
     tzstd = TimezoneStandard()
     tzstd.add("dtstart", datetime(1970, 1, 1, 0, 0, 0))
-    tzstd.add("tzoffsetfrom", "+0700")
-    tzstd.add("tzoffsetto", "+0700")
+    # icalendar mới yêu cầu timedelta thay vì string
+    tzstd.add("tzoffsetfrom", timedelta(hours=7))
+    tzstd.add("tzoffsetto", timedelta(hours=7))
     tzstd.add("tzname", "ICT")  # Indochina Time
     tz.add_component(tzstd)
 
