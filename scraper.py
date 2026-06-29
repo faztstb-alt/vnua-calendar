@@ -4,6 +4,7 @@ pip install requests icalendar
 """
 
 import os, json, base64, uuid
+import hashlib
 import requests
 from datetime import datetime, timezone, timedelta
 from icalendar import Calendar, Event
@@ -83,7 +84,6 @@ def get_latest_hocky():
 
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
 def get_tkb_hocky(hoc_ky_id):
-    # Body FLAT — không có "filter" wrapper, giống cURL thật
     body = {
         "hoc_ky": hoc_ky_id,
         "loai_doi_tuong": 1,
@@ -92,17 +92,12 @@ def get_tkb_hocky(hoc_ky_id):
 
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json=body)
     raw = resp.json()
-    print(f"DEBUG w-locdstkbhockytheodoituong keys: {list(raw.keys())}")
     data = raw.get("data", {})
     if isinstance(data, dict):
         ds = data.get("ds_nhom_to", [])
         print(f"DEBUG ds_nhom_to: {len(ds)} items")
-        if ds and isinstance(ds[0], dict):
-            print(f"DEBUG first keys: {list(ds[0].keys())}")
         return ds
-    else:
-        print(f"DEBUG data type: {type(data)}")
-        return []
+    return []
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
 def get_exams(hoc_ky_id):
@@ -122,6 +117,7 @@ def build_ics(ds_nhom_to, hoc_ky_info):
     cal.add("version", "2.0")
     cal.add("X-WR-CALNAME", "Lịch học VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
+    cal.add("METHOD", "PUBLISH")
 
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
@@ -155,6 +151,7 @@ def build_ics(ds_nhom_to, hoc_ky_info):
             nhom = tkb.get("nhom_to", "")
             tbd = int(tkb.get("tbd", 0))
             so_tiet = int(tkb.get("so_tiet", 0))
+            ma_mon = tkb.get("ma_mon", "")
 
             dow_offset = thu - 2
 
@@ -168,9 +165,13 @@ def build_ics(ds_nhom_to, hoc_ky_info):
                 dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
                 dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
 
+                # UID ổn định — cùng buổi học = cùng UID
+                uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hoc_ky_info['hoc_ky']}"
+                uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
+
                 ev = Event()
                 ev.add("dtstamp", now_utc)
-                ev.add("uid", str(uuid.uuid4()))
+                ev.add("uid", uid)
                 ev.add("summary", ten_mon)
                 ev.add("dtstart", dt_start)
                 ev.add("dtend", dt_end)
@@ -181,6 +182,7 @@ def build_ics(ds_nhom_to, hoc_ky_info):
                     f"Tiết {tbd}–{tbd + so_tiet - 1} | Nhóm {nhom}\n"
                     f"Tuần {week_num}"
                 ))
+                ev.add("sequence", 0)
                 cal.add_component(ev)
                 count += 1
 
@@ -198,6 +200,7 @@ def build_exam_ics(data):
     cal.add("version", "2.0")
     cal.add("X-WR-CALNAME", "Lịch thi VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
+    cal.add("METHOD", "PUBLISH")
 
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
@@ -232,18 +235,23 @@ def build_exam_ics(data):
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
             dt_end   = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
 
+            # UID ổn định cho lịch thi
+            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{gio_bd}"
+            uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
+
             desc_parts = []
             if thi.get("hinh_thuc_thi"): desc_parts.append(f"Hình thức: {thi['hinh_thuc_thi']}")
             if phong_str:                desc_parts.append(phong_str)
 
             ev = Event()
             ev.add("dtstamp", now_utc)
-            ev.add("uid", str(uuid.uuid4()))
+            ev.add("uid", uid)
             ev.add("summary", f"🔴 THI: {ten_mon}")
             ev.add("dtstart", dt_start)
             ev.add("dtend", dt_end)
             ev.add("location", phong_str)
             ev.add("description", "\n".join(desc_parts))
+            ev.add("sequence", 0)
             cal.add_component(ev)
             count += 1
         except Exception as e:
