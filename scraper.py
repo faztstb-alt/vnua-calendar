@@ -181,8 +181,9 @@ def build_exam_ics(data):
 if __name__ == "__main__":
     assert login(), "Login thất bại"
 
-    hk_id = get_current_hocky()
-    print(f"Học kì: {hk_id}")
+    hk_override = os.environ.get("HOC_KY_ID", "").strip()
+    hk_id = hk_override if hk_override else get_current_hocky()
+    print(f"Học kì: {hk_id}{' (chỉ định)' if hk_override else ' (hiện tại)'}")
 
     os.makedirs("docs", exist_ok=True)
 
