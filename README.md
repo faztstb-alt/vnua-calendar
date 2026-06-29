@@ -1,12 +1,14 @@
-Fork repo này
+1. Fork repo này
 
-Thêm SECRET
+2. Thêm SECRET
 
-SCHOOL_USER (msv) và 
+3. Thêm SCHOOL_USER (msv) và SCHOOL_PASS (mk)
 
-Sync Google Calendar
+4. Sync Google Calendar - Add URL Sự kiện
 
 https://faztstb-alt.github.io/vnua-calendar/schedule.ics
 
 https://faztstb-alt.github.io/vnua-calendar/exams.ics
+
+=Không biết thì hỏi AI cho nhanh
 
