@@ -123,8 +123,7 @@ def build_ics(all_entries, cal_name):
     cal.add("METHOD", "PUBLISH")
 
     now_utc = datetime.now(tz=timezone.utc)
-    total_count = 0
-    per_hk = {}  # Debug: đếm event per học kỳ
+    count = 0
 
     for entry in all_entries:
         try:
@@ -132,13 +131,11 @@ def build_ics(all_entries, cal_name):
             hk_info  = entry.get("hk_info", {})
             start_str = hk_info.get("ngay_bat_dau_hk", "")
             if not start_str:
-                print(f"DEBUG: HK {hk_info.get('hoc_ky','?')} skip — no start date")
                 continue
 
             start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
             monday_w1 = start_date - timedelta(days=start_date.weekday())
-            hk_id = hk_info.get("hoc_ky", "unknown")
-            per_hk[hk_id] = 0
+            hk_id = hk_info.get("hoc_ky", "")
 
             for tkb in tkb_list:
                 bitmap = str(tkb.get("tkb", "")).strip()
@@ -192,15 +189,13 @@ def build_ics(all_entries, cal_name):
                     ))
                     ev.add("sequence", 0)
                     cal.add_component(ev)
-                    total_count += 1
-                    per_hk[hk_id] += 1
+                    count += 1
 
         except Exception as e:
             print(f"Skip entry: {e}")
             continue
 
-    print(f"DEBUG TKB per HK: {per_hk}")
-    print(f"Total TKB: {total_count} sự kiện")
+    print(f"Total TKB: {count} sự kiện")
     return cal.to_ical()
 
 # ── Build Exam .ics từ tất cả học kỳ ─────────────────────────────────────────
@@ -214,7 +209,6 @@ def build_exam_ics(all_exams):
 
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
-    per_hk = {}
 
     for thi in all_exams:
         try:
@@ -223,10 +217,7 @@ def build_exam_ics(all_exams):
             ten_mon   = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
             phong_thi = thi.get("phong_thi") or thi.get("ma_phong") or ""
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
-            hk_id     = thi.get("hoc_ky", "unknown")
-
-            if hk_id not in per_hk:
-                per_hk[hk_id] = 0
+            hk_id     = thi.get("hoc_ky", "")
 
             ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
@@ -250,11 +241,9 @@ def build_exam_ics(all_exams):
             ev.add("sequence", 0)
             cal.add_component(ev)
             count += 1
-            per_hk[hk_id] += 1
         except Exception as e:
             print(f"Skip exam entry: {e} | data: {thi}")
 
-    print(f"DEBUG Exam per HK: {per_hk}")
     print(f"Total Lịch thi: {count} sự kiện")
     return cal.to_ical()
 
@@ -267,8 +256,8 @@ if __name__ == "__main__":
     ds_hk = get_hocky_list()
     print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
 
-    all_tkb_entries = []
-    all_exams = []
+    all_tkb_entries = []   # [{hk_info, tkb_list}, ...]
+    all_exams = []         # [exam, ...]
 
     for hk in ds_hk:
         hk_id = hk["hoc_ky"]
