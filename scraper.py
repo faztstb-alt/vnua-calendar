@@ -14,21 +14,18 @@ PASSWORD    = os.environ.get("SCHOOL_PASS", "")
 OUTPUT_TKB  = "docs/schedule.ics"
 OUTPUT_EXAM = "docs/exams.ics"
 
-# Bảng giờ tiết VNUA: tiết -> (giờ bắt đầu, giờ kết thúc)
-TIET_GIO = {
-    1:  ("07:00", "07:50"),
-    2:  ("07:55", "08:45"),
-    3:  ("08:50", "09:40"),
-    4:  ("09:55", "10:45"),
-    5:  ("10:50", "11:40"),
-    6:  ("12:45", "13:35"),
-    7:  ("13:40", "14:30"),
-    8:  ("14:35", "15:25"),
-    9:  ("15:40", "16:30"),
-    10: ("16:35", "17:25"),
-    11: ("18:00", "18:50"),
-    12: ("18:55", "19:45"),
-    13: ("19:50", "20:40"),
+# Giờ bắt đầu mỗi tiết
+TIET_BAT_DAU = {
+    1: "07:00",  2: "07:55",  3: "08:50",  4: "09:55",  5: "10:50",
+    6: "12:45",  7: "13:40",  8: "14:35",  9: "15:40", 10: "16:35",
+    11: "18:00", 12: "18:55", 13: "19:50",
+}
+
+# Giờ kết thúc mỗi tiết
+TIET_KET_THUC = {
+    1: "07:50",  2: "08:45",  3: "09:40",  4: "10:45",  5: "11:40",
+    6: "13:35",  7: "14:30",  8: "15:25",  9: "16:30", 10: "17:25",
+    11: "18:50", 12: "19:45", 13: "20:40",
 }
 
 S = requests.Session()
@@ -155,7 +152,6 @@ def build_ics(all_entries, cal_name):
                 if thu < 2 or thu > 8:
                     continue
 
-                # Ép kiểu int chắc chắn
                 tbd_raw = tkb.get("tbd", 0)
                 so_tiet_raw = tkb.get("so_tiet", 0)
                 try:
@@ -167,22 +163,16 @@ def build_ics(all_entries, cal_name):
                 if tbd <= 0 or so_tiet <= 0:
                     continue
 
-                # Tính tiết kết thúc
                 tiet_kt = tbd + so_tiet - 1
 
-                if tbd not in TIET_GIO or tiet_kt not in TIET_GIO:
+                if tbd not in TIET_BAT_DAU or tiet_kt not in TIET_KET_THUC:
                     print(f"DEBUG SKIP: tbd={tbd} tiet_kt={tiet_kt} out of range")
                     continue
 
-                # Lấy giờ bắt đầu tiết đầu, giờ KẾT THÚC tiết cuối
-                tu_gio = TIET_GIO[tbd][0]      # Giờ bắt đầu tiết tbd
-                den_gio = TIET_GIO[tiet_kt][1]  # Giờ kết thúc tiết tiet_kt
+                tu_gio = TIET_BAT_DAU[tbd]
+                den_gio = TIET_KET_THUC[tiet_kt]
 
-                # Debug cho môn Công nghệ sản xuất giống
                 ten_mon = tkb.get("ten_mon", "Môn học")
-                if "sản xuất giống" in ten_mon:
-                    print(f"DEBUG TIME: {ten_mon} | tbd={tbd} so_tiet={so_tiet} tiet_kt={tiet_kt} | {tu_gio} -> {den_gio}")
-
                 phong = str(tkb.get("phong", "")).strip()
                 gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
                 nhom = tkb.get("nhom_to", "")
@@ -200,7 +190,7 @@ def build_ics(all_entries, cal_name):
                     dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
                     dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
 
-                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}|v2"  # Thêm |v2
+                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
                     uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
                     ev = Event()
