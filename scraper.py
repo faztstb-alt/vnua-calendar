@@ -50,7 +50,7 @@ def login():
     print("Login OK | Token:", access_token[:30], "...")
     return True
 
-# ── Lấy danh sách học kỳ + ngày bắt đầu ───────────────────────────────────────
+# ── Lấy danh sách học kỳ (có ngày bắt đầu) ───────────────────────────────────
 def get_hocky_list():
     resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={})
     return resp.json()["data"]["ds_hoc_ky"]
@@ -62,9 +62,8 @@ def get_latest_hocky():
           f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
     return latest
 
-# ── Lấy khung giờ tiết (nếu API mới không trả) ───────────────────────────────
+# ── Lấy khung giờ tiết (fallback từ API tuần cũ) ───────────────────────────────
 def get_tiet_map():
-    # Thử lấy từ API cũ — chỉ cần gọi 1 lần để lấy ds_tiet_trong_ngay
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbtuanusertheohocky", json={
         "filter": {"hoc_ky": "20261", "ten_hoc_ky": ""},
         "additional": {
@@ -77,6 +76,8 @@ def get_tiet_map():
                 for t in data.get("ds_tiet_trong_ngay", [])}
     if tiet_map:
         print(f"Loaded {len(tiet_map)} time slots from fallback API")
+    else:
+        print("Warning: Không lấy được ds_tiet_trong_ngay")
     return tiet_map
 
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
@@ -90,7 +91,7 @@ def get_tkb_hocky(hoc_ky_id):
     })
     return resp.json().get("data", {})
 
-# ── Lấy lịch thi (giữ nguyên endpoint cũ) ────────────────────────────────────
+# ── Lấy lịch thi ─────────────────────────────────────────────────────────────
 def get_exams(hoc_ky_id):
     resp = S.post(f"{BASE_URL}/api/epm/w-locdslichthisvtheohocky", json={
         "filter": {"hoc_ky": hoc_ky_id, "is_giua_ky": False},
@@ -260,7 +261,6 @@ if __name__ == "__main__":
     hk_override = os.environ.get("HOC_KY_ID", "").strip()
 
     if hk_override:
-        # Nếu override chỉ có mã, lấy info từ list
         ds_hk = get_hocky_list()
         hk_info = next((h for h in ds_hk if str(h["hoc_ky"]) == hk_override), None)
         if not hk_info:
