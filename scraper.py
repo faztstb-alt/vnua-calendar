@@ -50,28 +50,17 @@ def login():
     print("Login OK | Token:", access_token[:30], "...")
     return True
 
-# ── Lấy học kì hiện tại ───────────────────────────────────────────────────────
-def get_current_hocky():
+# ── Lấy danh sách + học kì mới nhất từ web (ds_hoc_ky) ────────────────────────
+def get_hocky_list():
     resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={})
-    data = resp.json()["data"]
-    return data["hoc_ky_theo_ngay_hien_tai"]
+    return resp.json()["data"]["ds_hoc_ky"]
 
-# ── Tính mã học kì theo ngày (không phụ thuộc server) ─────────────────────────
-# Quy luật: HK1 = tháng 8→1 (năm bắt đầu = năm có tháng 8)
-#           HK2 = tháng 2→6  (năm bắt đầu = năm trước đó)
-#           HK3 = tháng 7 (hè, năm bắt đầu = năm trước đó)
-def get_hocky_by_date(today=None):
-    today = today or datetime.now(tz=timezone(timedelta(hours=7))).date()
-    y, m = today.year, today.month
-    if m == 1:
-        start, sem = y - 1, 1
-    elif 8 <= m <= 12:
-        start, sem = y, 1
-    elif 2 <= m <= 6:
-        start, sem = y - 1, 2
-    else:  # tháng 7
-        start, sem = y - 1, 3
-    return f"{start}{sem}"
+def get_latest_hocky():
+    ds = get_hocky_list()
+    latest = max(ds, key=lambda hk: hk["hoc_ky"])
+    print(f"Mới nhất trên web: {latest['hoc_ky']} - {latest['ten_hoc_ky']} "
+          f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
+    return latest["hoc_ky"]
 
 # ── Lấy TKB toàn học kì ───────────────────────────────────────────────────────
 def get_tkb(hoc_ky_id):
@@ -199,20 +188,13 @@ if __name__ == "__main__":
     assert login(), "Login thất bại"
 
     hk_override = os.environ.get("HOC_KY_ID", "").strip()
-    hk_by_date = get_hocky_by_date()
 
     if hk_override:
         hk_id = hk_override
         print(f"Học kì: {hk_id} (chỉ định)")
     else:
-        hk_id = hk_by_date
-        print(f"Học kì: {hk_id} (tính theo ngày)")
-        try:
-            hk_server = get_current_hocky()
-            if hk_server != hk_by_date:
-                print(f"⚠ Server báo hiện tại là {hk_server}, khác với tính theo ngày ({hk_by_date}). Đang dùng {hk_by_date}.")
-        except Exception as e:
-            print(f"(Không lấy được hoc_ky_theo_ngay_hien_tai để so sánh: {e})")
+        hk_id = get_latest_hocky()
+        print(f"Học kì: {hk_id} (mới nhất trên web)")
 
     os.makedirs("docs", exist_ok=True)
 
