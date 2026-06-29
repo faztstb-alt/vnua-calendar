@@ -10,5 +10,7 @@ https://faztstb-alt.github.io/vnua-calendar/schedule.ics
 
 https://faztstb-alt.github.io/vnua-calendar/exams.ics
 
+5. Cho chạy Action Workflow 1 lần
+
 =Không biết thì hỏi AI cho nhanh
 
