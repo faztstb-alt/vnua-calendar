@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '0 1 * * 1'   # Thứ 2 mỗi tuần, 8:00 SA (UTC+7)
   workflow_dispatch:        # Trigger thủ công
+    inputs:
+      hoc_ky_id:
+        description: 'Mã học kỳ (để trống = học kỳ hiện tại). Ví dụ: 20261, 20253'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -26,6 +31,7 @@ jobs:
         env:
           SCHOOL_USER: ${{ secrets.SCHOOL_USER }}
           SCHOOL_PASS: ${{ secrets.SCHOOL_PASS }}
+          HOC_KY_ID: ${{ github.event.inputs.hoc_ky_id }}
         run: python scraper.py
 
       - name: Commit & push .ics
