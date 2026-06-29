@@ -75,13 +75,6 @@ def get_hocky_list():
     })
     return resp.json()["data"]["ds_hoc_ky"]
 
-def get_latest_hocky():
-    ds = get_hocky_list()
-    latest = max(ds, key=lambda hk: hk["hoc_ky"])
-    print(f"Mới nhất trên web: {latest['hoc_ky']} - {latest['ten_hoc_ky']} "
-          f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
-    return latest
-
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
 def get_tkb_hocky(hoc_ky_id):
     body = {
@@ -95,8 +88,9 @@ def get_tkb_hocky(hoc_ky_id):
     data = raw.get("data", {})
     if isinstance(data, dict):
         ds = data.get("ds_nhom_to", [])
-        print(f"DEBUG ds_nhom_to: {len(ds)} items")
+        print(f"  HK {hoc_ky_id}: {len(ds)} TKB items")
         return ds
+    print(f"  HK {hoc_ky_id}: no data")
     return []
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
@@ -108,93 +102,104 @@ def get_exams(hoc_ky_id):
             "ordering": [{"name": None, "order_type": None}]
         }
     })
-    return resp.json().get("data", {})
+    data = resp.json().get("data", {})
+    ds = data.get("ds_lich_thi") if isinstance(data, dict) else data
+    if isinstance(ds, int):
+        ds = []
+    elif isinstance(ds, dict):
+        ds = list(ds.values())
+    elif not isinstance(ds, list):
+        ds = []
+    print(f"  HK {hoc_ky_id}: {len(ds)} exam items")
+    return ds
 
 # ── Build TKB .ics từ dạng học kỳ (bitmap) ───────────────────────────────────
-def build_ics(ds_nhom_to, hoc_ky_info):
+def build_ics(all_entries, cal_name):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Schedule//VN")
     cal.add("version", "2.0")
-    cal.add("X-WR-CALNAME", "Lịch học VNUA")
+    cal.add("X-WR-CALNAME", cal_name)
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
     cal.add("METHOD", "PUBLISH")
 
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
 
-    start_str = hoc_ky_info.get("ngay_bat_dau_hk", "")
-    if not start_str:
-        print("Warning: Không có ngày bắt đầu học kỳ")
-        return cal.to_ical()
-
-    start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
-    monday_w1 = start_date - timedelta(days=start_date.weekday())
-
-    for tkb in ds_nhom_to:
+    for entry in all_entries:
         try:
-            bitmap = str(tkb.get("tkb", "")).strip()
-            if not bitmap:
+            tkb_list = entry.get("tkb_list", [])
+            hk_info  = entry.get("hk_info", {})
+            start_str = hk_info.get("ngay_bat_dau_hk", "")
+            if not start_str:
                 continue
 
-            thu = int(tkb.get("thu", 0))
-            if thu < 2 or thu > 8:
-                continue
+            start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
+            monday_w1 = start_date - timedelta(days=start_date.weekday())
+            hk_id = hk_info.get("hoc_ky", "")
 
-            tu_gio = tkb.get("tu_gio", "")
-            den_gio = tkb.get("den_gio", "")
-            if not tu_gio or not den_gio:
-                continue
-
-            ten_mon = tkb.get("ten_mon", "Môn học")
-            phong = str(tkb.get("phong", "")).strip()
-            gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
-            nhom = tkb.get("nhom_to", "")
-            tbd = int(tkb.get("tbd", 0))
-            so_tiet = int(tkb.get("so_tiet", 0))
-            ma_mon = tkb.get("ma_mon", "")
-
-            dow_offset = thu - 2
-
-            for week_idx, char in enumerate(bitmap):
-                if char == "-":
+            for tkb in tkb_list:
+                bitmap = str(tkb.get("tkb", "")).strip()
+                if not bitmap:
                     continue
 
-                week_num = week_idx + 1
-                event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
+                thu = int(tkb.get("thu", 0))
+                if thu < 2 or thu > 8:
+                    continue
 
-                dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
-                dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
+                tu_gio = tkb.get("tu_gio", "")
+                den_gio = tkb.get("den_gio", "")
+                if not tu_gio or not den_gio:
+                    continue
 
-                # UID ổn định — cùng buổi học = cùng UID
-                uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hoc_ky_info['hoc_ky']}"
-                uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
+                ten_mon = tkb.get("ten_mon", "Môn học")
+                phong = str(tkb.get("phong", "")).strip()
+                gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
+                nhom = tkb.get("nhom_to", "")
+                tbd = int(tkb.get("tbd", 0))
+                so_tiet = int(tkb.get("so_tiet", 0))
+                ma_mon = tkb.get("ma_mon", "")
 
-                ev = Event()
-                ev.add("dtstamp", now_utc)
-                ev.add("uid", uid)
-                ev.add("summary", ten_mon)
-                ev.add("dtstart", dt_start)
-                ev.add("dtend", dt_end)
-                ev.add("location", phong)
-                ev.add("description", (
-                    f"GV: {gv}\n"
-                    f"{phong}\n"
-                    f"Tiết {tbd}–{tbd + so_tiet - 1} | Nhóm {nhom}\n"
-                    f"Tuần {week_num}"
-                ))
-                ev.add("sequence", 0)
-                cal.add_component(ev)
-                count += 1
+                dow_offset = thu - 2
+
+                for week_idx, char in enumerate(bitmap):
+                    if char == "-":
+                        continue
+
+                    week_num = week_idx + 1
+                    event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
+
+                    dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
+                    dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
+
+                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
+                    uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
+
+                    ev = Event()
+                    ev.add("dtstamp", now_utc)
+                    ev.add("uid", uid)
+                    ev.add("summary", ten_mon)
+                    ev.add("dtstart", dt_start)
+                    ev.add("dtend", dt_end)
+                    ev.add("location", phong)
+                    ev.add("description", (
+                        f"GV: {gv}\n"
+                        f"{phong}\n"
+                        f"Tiết {tbd}–{tbd + so_tiet - 1} | Nhóm {nhom}\n"
+                        f"Tuần {week_num} | HK {hk_id}"
+                    ))
+                    ev.add("sequence", 0)
+                    cal.add_component(ev)
+                    count += 1
 
         except Exception as e:
-            print(f"Skip TKB entry: {e} | data: {tkb}")
+            print(f"Skip entry: {e}")
             continue
 
-    print(f"TKB: {count} sự kiện")
+    print(f"Total TKB: {count} sự kiện")
     return cal.to_ical()
 
 # ── Build Exam .ics ───────────────────────────────────────────────────────────
-def build_exam_ics(data):
+def build_exam_ics(all_exams):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Exams//VN")
     cal.add("version", "2.0")
@@ -205,38 +210,20 @@ def build_exam_ics(data):
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
 
-    ds = None
-    if isinstance(data, dict):
-        ds = data.get("ds_lich_thi")
-        if ds is None:
-            ds = data.get("data")
-    if ds is None:
-        ds = data
-
-    if isinstance(ds, dict):
-        vals = list(ds.values())
-        ds = vals[0] if vals else []
-    if isinstance(ds, int):
-        print(f"Warning: Exam data là số ({ds}), bỏ qua lịch thi.")
-        ds = []
-    elif not isinstance(ds, (list, tuple)):
-        print(f"Warning: Exam data kiểu {type(ds)}, bỏ qua lịch thi.")
-        ds = []
-
-    for thi in ds:
+    for thi in all_exams:
         try:
             ngay_thi  = thi.get("ngay_thi") or thi.get("ngay")
             gio_bd    = thi.get("gio_bat_dau") or thi.get("gio_thi") or "00:00"
             ten_mon   = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
             phong_thi = thi.get("phong_thi") or thi.get("ma_phong") or ""
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
+            hk_id     = thi.get("hoc_ky", "")
 
             ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
             dt_end   = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
 
-            # UID ổn định cho lịch thi
-            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{gio_bd}"
+            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{gio_bd}|{hk_id}"
             uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
             desc_parts = []
@@ -257,7 +244,7 @@ def build_exam_ics(data):
         except Exception as e:
             print(f"Skip exam entry: {e} | data: {thi}")
 
-    print(f"Lịch thi: {count} sự kiện")
+    print(f"Total Lịch thi: {count} sự kiện")
     return cal.to_ical()
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -266,19 +253,29 @@ if __name__ == "__main__":
     if not user_data:
         raise SystemExit("Login thất bại")
 
-    hk_info = get_latest_hocky()
-    hk_id = hk_info["hoc_ky"]
-    print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
+    ds_hk = get_hocky_list()
+    print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
 
-    ds_nhom_to = get_tkb_hocky(hk_id)
+    all_tkb_entries = []   # [{hk_info, tkb_list}, ...]
+    all_exams = []         # [exam, ...]
+
+    for hk in ds_hk:
+        hk_id = hk["hoc_ky"]
+        print(f"\nFetching HK {hk_id} ({hk.get('ten_hoc_ky','')})...")
+
+        tkb_list = get_tkb_hocky(hk_id)
+        if tkb_list:
+            all_tkb_entries.append({"hk_info": hk, "tkb_list": tkb_list})
+
+        exams = get_exams(hk_id)
+        all_exams.extend(exams)
 
     os.makedirs("docs", exist_ok=True)
 
     with open(OUTPUT_TKB, "wb") as f:
-        f.write(build_ics(ds_nhom_to, hk_info))
-    print(f"Saved: {OUTPUT_TKB}")
+        f.write(build_ics(all_tkb_entries, "Lịch học VNUA"))
+    print(f"\nSaved: {OUTPUT_TKB}")
 
-    exam_data = get_exams(hk_id)
     with open(OUTPUT_EXAM, "wb") as f:
-        f.write(build_exam_ics(exam_data))
+        f.write(build_exam_ics(all_exams))
     print(f"Saved: {OUTPUT_EXAM}")
