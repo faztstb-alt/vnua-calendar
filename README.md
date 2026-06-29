@@ -1,4 +1,10 @@
-sync calendar
+Fork repo này
+
+Thêm SECRET
+
+SCHOOL_USER (msv) và 
+
+Sync Google Calendar
 
 https://faztstb-alt.github.io/vnua-calendar/schedule.ics
 
