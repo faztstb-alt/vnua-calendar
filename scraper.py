@@ -494,6 +494,9 @@ def build_ics(all_entries, cal_name):
                 tu_gio = TIET_GIO[tbd][0]
                 den_gio = TIET_GIO[tiet_kt][1]
 
+                if ten_mon == "Công nghệ sản xuất giống và nuôi hải sản 1":
+    print(f"DEBUG TIME: tbd={tbd} so_tiet={so_tiet} tiet_kt={tiet_kt} tu_gio={tu_gio} den_gio={den_gio}")
+
                 ten_mon = tkb.get("ten_mon", "Môn học")
                 phong = str(tkb.get("phong", "")).strip()
                 gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
