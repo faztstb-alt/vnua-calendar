@@ -15,7 +15,22 @@ OUTPUT_TKB  = "docs/schedule.ics"
 OUTPUT_EXAM = "docs/exams.ics"
 
 S = requests.Session()
-S.headers.update({"User-Agent": "Mozilla/5.0", "Referer": BASE_URL})
+S.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Referer": f"{BASE_URL}/public/",
+    "Origin": BASE_URL,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "vi,en;q=0.9",
+    "DNT": "1",
+    "Idpc": "0",
+    "Priority": "u=1, i",
+    "Sec-Ch-Ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+})
 
 # ── Login ─────────────────────────────────────────────────────────────────────
 def login():
@@ -42,9 +57,7 @@ def login():
     access_token = user_data["access_token"]
 
     S.headers.update({
-        "Authorization":    f"Bearer {access_token}",
-        "Accept":           "application/json, text/plain, */*",
-        "Idpc":             "0",
+        "Authorization": f"Bearer {access_token}",
         "X-Requested-With": "XMLHttpRequest",
     })
     print("Login OK | Token:", access_token[:30], "...")
@@ -52,7 +65,13 @@ def login():
 
 # ── Lấy danh sách học kỳ (có ngày bắt đầu) ───────────────────────────────────
 def get_hocky_list():
-    resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={})
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={
+        "filter": {"is_tieng_anh": None},
+        "additional": {
+            "paging": {"limit": 100, "page": 1},
+            "ordering": [{"name": "hoc_ky", "order_type": 1}]
+        }
+    })
     return resp.json()["data"]["ds_hoc_ky"]
 
 def get_latest_hocky():
@@ -64,30 +83,26 @@ def get_latest_hocky():
 
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
 def get_tkb_hocky(hoc_ky_id):
+    # Body FLAT — không có "filter" wrapper, giống cURL thật
     body = {
-        "filter": {
-            "hoc_ky": hoc_ky_id,
-            "loai_doi_tuong": 1,
-            "ma_doi_tuong": USERNAME,
-        },
-        "additional": {
-            "paging": {"limit": 100, "page": 1},
-            "ordering": [{"name": None, "order_type": None}]
-        }
+        "hoc_ky": hoc_ky_id,
+        "loai_doi_tuong": 1,
+        "id_du_lieu": None,
     }
 
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json=body)
     raw = resp.json()
+    print(f"DEBUG w-locdstkbhockytheodoituong keys: {list(raw.keys())}")
     data = raw.get("data", {})
     if isinstance(data, dict):
         ds = data.get("ds_nhom_to", [])
         print(f"DEBUG ds_nhom_to: {len(ds)} items")
         if ds and isinstance(ds[0], dict):
-            print(f"DEBUG first item keys: {list(ds[0].keys())}")
+            print(f"DEBUG first keys: {list(ds[0].keys())}")
+        return ds
     else:
-        ds = []
         print(f"DEBUG data type: {type(data)}")
-    return ds
+        return []
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
 def get_exams(hoc_ky_id):
@@ -111,14 +126,13 @@ def build_ics(ds_nhom_to, hoc_ky_info):
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
 
-    # Ngày bắt đầu học kỳ → tìm Thứ 2 tuần 1
     start_str = hoc_ky_info.get("ngay_bat_dau_hk", "")
     if not start_str:
         print("Warning: Không có ngày bắt đầu học kỳ")
         return cal.to_ical()
 
     start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
-    monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
+    monday_w1 = start_date - timedelta(days=start_date.weekday())
 
     for tkb in ds_nhom_to:
         try:
@@ -130,7 +144,6 @@ def build_ics(ds_nhom_to, hoc_ky_info):
             if thu < 2 or thu > 8:
                 continue
 
-            # Dùng tu_gio/den_gio trực tiếp, không cần tiet_map
             tu_gio = tkb.get("tu_gio", "")
             den_gio = tkb.get("den_gio", "")
             if not tu_gio or not den_gio:
@@ -140,8 +153,9 @@ def build_ics(ds_nhom_to, hoc_ky_info):
             phong = str(tkb.get("phong", "")).strip()
             gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
             nhom = tkb.get("nhom_to", "")
+            tbd = int(tkb.get("tbd", 0))
+            so_tiet = int(tkb.get("so_tiet", 0))
 
-            # thu=2 (Mon) → offset 0, thu=7 (Sat) → 5, thu=8 (Sun) → 6
             dow_offset = thu - 2
 
             for week_idx, char in enumerate(bitmap):
@@ -164,7 +178,7 @@ def build_ics(ds_nhom_to, hoc_ky_info):
                 ev.add("description", (
                     f"GV: {gv}\n"
                     f"{phong}\n"
-                    f"Tiết {tkb.get('tbd','?')}–{tkb.get('tbd','?') + tkb.get('so_tiet',0) - 1} | Nhóm {nhom}\n"
+                    f"Tiết {tbd}–{tbd + so_tiet - 1} | Nhóm {nhom}\n"
                     f"Tuần {week_num}"
                 ))
                 cal.add_component(ev)
