@@ -125,10 +125,9 @@ def make_vn_timezone():
 
     tzstd = TimezoneStandard()
     tzstd.add("dtstart", datetime(1970, 1, 1, 0, 0, 0))
-    # icalendar mới yêu cầu timedelta thay vì string
     tzstd.add("tzoffsetfrom", timedelta(hours=7))
     tzstd.add("tzoffsetto", timedelta(hours=7))
-    tzstd.add("tzname", "ICT")  # Indochina Time
+    tzstd.add("tzname", "ICT")
     tz.add_component(tzstd)
 
     return tz
@@ -142,7 +141,6 @@ def build_ics(all_entries, cal_name):
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
     cal.add("METHOD", "PUBLISH")
 
-    # THÊM VTIMEZONE - BẮT BUỘC để Google Calendar hiểu đúng timezone
     cal.add_component(make_vn_timezone())
 
     now_utc = datetime.now(tz=timezone.utc)
@@ -206,11 +204,9 @@ def build_ics(all_entries, cal_name):
                     week_num = week_idx + 1
                     event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
 
-                    # Tạo datetime với timezone Asia/Ho_Chi_Minh
                     dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
                     dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
 
-                    # Gắn timezone cho datetime object
                     vn_tz = timezone(timedelta(hours=7))
                     dt_start = dt_start.replace(tzinfo=vn_tz)
                     dt_end = dt_end.replace(tzinfo=vn_tz)
@@ -222,7 +218,6 @@ def build_ics(all_entries, cal_name):
                     ev.add("dtstamp", now_utc)
                     ev.add("uid", uid)
                     ev.add("summary", ten_mon)
-                    # icalendar sẽ tự động thêm TZID khi datetime có tzinfo
                     ev.add("dtstart", dt_start)
                     ev.add("dtend", dt_end)
                     ev.add("location", phong)
@@ -254,7 +249,6 @@ def build_exam_ics(all_exams):
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
     cal.add("METHOD", "PUBLISH")
 
-    # THÊM VTIMEZONE cho lịch thi luôn
     cal.add_component(make_vn_timezone())
 
     now_utc = datetime.now(tz=timezone.utc)
@@ -264,11 +258,28 @@ def build_exam_ics(all_exams):
     for thi in all_exams:
         try:
             ngay_thi  = thi.get("ngay_thi") or thi.get("ngay")
-            gio_bd    = thi.get("gio_bat_dau") or thi.get("gio_thi") or "00:00"
+            gio_bd    = thi.get("gio_bat_dau") or thi.get("gio_thi") or "07:00"
             ten_mon   = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
             phong_thi = thi.get("phong_thi") or thi.get("ma_phong") or ""
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
             hk_id     = thi.get("hoc_ky", "unknown")
+
+            # Lấy tiết bắt đầu và số tiết thi (mặc định 2 tiết nếu không có)
+            tbd_raw = thi.get("tiet_bat_dau", 1) or thi.get("tbd", 1)
+            so_tiet_raw = thi.get("so_tiet", 2) or 2
+            try:
+                tbd = int(str(tbd_raw).strip())
+                so_tiet = int(str(so_tiet_raw).strip())
+            except (ValueError, TypeError):
+                tbd = 1
+                so_tiet = 2
+
+            tiet_kt = tbd + so_tiet - 1
+
+            # Giới hạn trong khoảng tiết hợp lệ
+            if tbd < 1: tbd = 1
+            if tiet_kt > 13: tiet_kt = 13
+            if tiet_kt < tbd: tiet_kt = tbd
 
             if hk_id not in per_hk:
                 per_hk[hk_id] = 0
@@ -276,21 +287,27 @@ def build_exam_ics(all_exams):
             if not ngay_thi:
                 continue
 
-            ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
-            dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
-            dt_end   = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
+            ngay = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
 
-            # Gắn timezone
+            # Dùng bảng tiết giống TKB
+            tu_gio = TIET_BAT_DAU.get(tbd, "07:00")
+            den_gio = TIET_KET_THUC.get(tiet_kt, "09:40")
+
+            dt_start = datetime.strptime(f"{ngay} {tu_gio}", "%Y-%m-%d %H:%M")
+            dt_end   = datetime.strptime(f"{ngay} {den_gio}", "%Y-%m-%d %H:%M")
+
             vn_tz = timezone(timedelta(hours=7))
             dt_start = dt_start.replace(tzinfo=vn_tz)
             dt_end = dt_end.replace(tzinfo=vn_tz)
 
-            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{gio_bd}|{hk_id}"
+            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{tu_gio}|{hk_id}"
             uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
             desc_parts = []
             if thi.get("hinh_thuc_thi"): desc_parts.append(f"Hình thức: {thi['hinh_thuc_thi']}")
             if phong_str:                desc_parts.append(phong_str)
+            desc_parts.append(f"Tiết {tbd}–{tiet_kt}")
+            desc_parts.append(f"HK {hk_id}")
 
             ev = Event()
             ev.add("dtstamp", now_utc)
