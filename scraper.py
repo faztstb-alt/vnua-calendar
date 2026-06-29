@@ -111,7 +111,6 @@ def build_ics(data):
                 continue
 
             ngay     = datetime.fromisoformat(tkb["ngay_hoc"]).date()
-            # naive datetime — Google dùng X-WR-TIMEZONE
             dt_start = datetime.strptime(f"{ngay} {tiet_map[tiet_bd][0]}", "%Y-%m-%d %H:%M")
             dt_end   = datetime.strptime(f"{ngay} {tiet_map[tiet_kt][1]}", "%Y-%m-%d %H:%M")
 
@@ -146,9 +145,24 @@ def build_exam_ics(data):
     now_utc = datetime.now(tz=timezone.utc)
     count   = 0
 
-    ds = data.get("ds_lich_thi") or data.get("data") or data
+    # Trích xuất an toàn — API đôi khi trả số hoặc dict rỗng
+    ds = None
+    if isinstance(data, dict):
+        ds = data.get("ds_lich_thi")
+        if ds is None:
+            ds = data.get("data")
+    if ds is None:
+        ds = data
+
     if isinstance(ds, dict):
-        ds = list(ds.values())[0]
+        vals = list(ds.values())
+        ds = vals[0] if vals else []
+    if isinstance(ds, int):
+        print(f"Warning: Exam data là số ({ds}), bỏ qua lịch thi.")
+        ds = []
+    elif not isinstance(ds, (list, tuple)):
+        print(f"Warning: Exam data kiểu {type(ds)}, bỏ qua lịch thi.")
+        ds = []
 
     for thi in ds:
         try:
@@ -159,7 +173,6 @@ def build_exam_ics(data):
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
 
             ngay     = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
-            # naive datetime — giống TKB
             dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
             dt_end   = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
 
