@@ -56,6 +56,23 @@ def get_current_hocky():
     data = resp.json()["data"]
     return data["hoc_ky_theo_ngay_hien_tai"]
 
+# ── Tính mã học kì theo ngày (không phụ thuộc server) ─────────────────────────
+# Quy luật: HK1 = tháng 8→1 (năm bắt đầu = năm có tháng 8)
+#           HK2 = tháng 2→6  (năm bắt đầu = năm trước đó)
+#           HK3 = tháng 7 (hè, năm bắt đầu = năm trước đó)
+def get_hocky_by_date(today=None):
+    today = today or datetime.now(tz=timezone(timedelta(hours=7))).date()
+    y, m = today.year, today.month
+    if m == 1:
+        start, sem = y - 1, 1
+    elif 8 <= m <= 12:
+        start, sem = y, 1
+    elif 2 <= m <= 6:
+        start, sem = y - 1, 2
+    else:  # tháng 7
+        start, sem = y - 1, 3
+    return f"{start}{sem}"
+
 # ── Lấy TKB toàn học kì ───────────────────────────────────────────────────────
 def get_tkb(hoc_ky_id):
     resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbtuanusertheohocky", json={
@@ -182,8 +199,20 @@ if __name__ == "__main__":
     assert login(), "Login thất bại"
 
     hk_override = os.environ.get("HOC_KY_ID", "").strip()
-    hk_id = hk_override if hk_override else get_current_hocky()
-    print(f"Học kì: {hk_id}{' (chỉ định)' if hk_override else ' (hiện tại)'}")
+    hk_by_date = get_hocky_by_date()
+
+    if hk_override:
+        hk_id = hk_override
+        print(f"Học kì: {hk_id} (chỉ định)")
+    else:
+        hk_id = hk_by_date
+        print(f"Học kì: {hk_id} (tính theo ngày)")
+        try:
+            hk_server = get_current_hocky()
+            if hk_server != hk_by_date:
+                print(f"⚠ Server báo hiện tại là {hk_server}, khác với tính theo ngày ({hk_by_date}). Đang dùng {hk_by_date}.")
+        except Exception as e:
+            print(f"(Không lấy được hoc_ky_theo_ngay_hien_tai để so sánh: {e})")
 
     os.makedirs("docs", exist_ok=True)
 
