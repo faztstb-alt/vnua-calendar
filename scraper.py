@@ -48,7 +48,7 @@ def login():
         "X-Requested-With": "XMLHttpRequest",
     })
     print("Login OK | Token:", access_token[:30], "...")
-    return True
+    return user_data
 
 # ── Lấy danh sách học kỳ (có ngày bắt đầu) ───────────────────────────────────
 def get_hocky_list():
@@ -61,6 +61,41 @@ def get_latest_hocky():
     print(f"Mới nhất trên web: {latest['hoc_ky']} - {latest['ten_hoc_ky']} "
           f"({latest['ngay_bat_dau_hk']} → {latest['ngay_ket_thuc_hk']})")
     return latest
+
+# ── Lấy đối tượng TKB (sinh viên/lớp) theo học kỳ ───────────────────────────
+def get_doi_tuong(hoc_ky_id):
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdsdoituongthoikhoabieuhocky", json={
+        "filter": {"hoc_ky": hoc_ky_id},
+        "additional": {
+            "paging": {"limit": 100, "page": 1},
+            "ordering": [{"name": None, "order_type": None}]
+        }
+    })
+    raw = resp.json()
+    print(f"DEBUG w-locdsdoituongthoikhoabieuhocky keys: {list(raw.keys())}")
+    data = raw.get("data", {})
+    if isinstance(data, dict):
+        print(f"DEBUG data keys: {list(data.keys())}")
+        # Thử nhiều key chứa danh sách đối tượng
+        for key in ["ds_doituong", "ds_doi_tuong", "doituong", "items", "data"]:
+            if key in data:
+                ds = data[key]
+                if isinstance(ds, list) and ds:
+                    print(f"DEBUG found {len(ds)} objects via '{key}'")
+                    # Ưu tiên cái đang chọn (is_chon), hoặc lấy cái đầu
+                    chosen = next((x for x in ds if x.get("is_chon") or x.get("is_selected")), ds[0])
+                    print(f"DEBUG chosen: {json.dumps(chosen, ensure_ascii=False, default=str)}")
+                    return chosen
+                elif isinstance(ds, dict):
+                    print(f"DEBUG single object via '{key}'")
+                    return ds
+    elif isinstance(data, list) and data:
+        print(f"DEBUG data is list, len={len(data)}")
+        chosen = next((x for x in data if x.get("is_chon") or x.get("is_selected")), data[0])
+        return chosen
+
+    print("ERROR: Không lấy được đối tượng TKB")
+    return None
 
 # ── Lấy khung giờ tiết (fallback từ API tuần cũ) ───────────────────────────────
 def get_tiet_map():
@@ -81,14 +116,26 @@ def get_tiet_map():
     return tiet_map
 
 # ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
-def get_tkb_hocky(hoc_ky_id):
-    resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json={
-        "filter": {"hoc_ky": hoc_ky_id},
+def get_tkb_hocky(hoc_ky_id, doi_tuong):
+    if not doi_tuong:
+        return {}
+
+    loai = doi_tuong.get("loai_doi_tuong") or "SV"
+    ma   = doi_tuong.get("ma_doi_tuong") or doi_tuong.get("ma") or doi_tuong.get("ma_sinh_vien") or USERNAME
+
+    body = {
+        "filter": {
+            "hoc_ky": hoc_ky_id,
+            "loai_doi_tuong": loai,
+            "ma_doi_tuong": ma,
+        },
         "additional": {
             "paging": {"limit": 100, "page": 1},
             "ordering": [{"name": None, "order_type": None}]
         }
-    })
+    }
+
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json=body)
     raw = resp.json()
     print(f"DEBUG w-locdstkbhockytheodoituong keys: {list(raw.keys())}")
     data = raw.get("data", {})
@@ -96,8 +143,6 @@ def get_tkb_hocky(hoc_ky_id):
         print(f"DEBUG data keys: {list(data.keys())}")
     elif isinstance(data, list):
         print(f"DEBUG data is list, len={len(data)}")
-    else:
-        print(f"DEBUG data type: {type(data)}")
     return data
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
@@ -131,10 +176,10 @@ def build_ics(data, hoc_ky_info, tiet_map):
     start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
     monday_w1 = start_date - timedelta(days=start_date.weekday())  # Monday=0
 
-    # Trích danh sách TKB — thử nhiều key phổ biến
+    # Trích danh sách TKB
     ds = None
     if isinstance(data, dict):
-        for key in ["ds_tkb_hoc_ky", "ds_thoi_khoa_bieu", "ds_tkb", "data", "items", "rows"]:
+        for key in ["ds_tkb_hoc_ky", "ds_thoi_khoa_bieu", "ds_tkb", "data", "items", "rows", "result"]:
             if key in data:
                 ds = data[key]
                 print(f"DEBUG using data['{key}']")
@@ -150,9 +195,9 @@ def build_ics(data, hoc_ky_info, tiet_map):
         return cal.to_ical()
 
     print(f"DEBUG total entries before filter: {len(ds)}")
-    if ds:
-        print(f"DEBUG first entry keys: {list(ds[0].keys()) if isinstance(ds[0], dict) else type(ds[0])}")
-        print(f"DEBUG first entry sample: {json.dumps(ds[0], ensure_ascii=False, default=str)[:300]}")
+    if ds and isinstance(ds[0], dict):
+        print(f"DEBUG first entry keys: {list(ds[0].keys())}")
+        print(f"DEBUG first entry sample: {json.dumps(ds[0], ensure_ascii=False, default=str)[:400]}")
 
     for tkb in ds:
         try:
@@ -282,19 +327,26 @@ def build_exam_ics(data):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    assert login(), "Login thất bại"
+    user_data = login()
+    if not user_data:
+        raise SystemExit("Login thất bại")
 
-    # Luôn lấy học kỳ mới nhất từ web, bỏ input override
+    # Luôn lấy học kỳ mới nhất từ web
     hk_info = get_latest_hocky()
     hk_id = hk_info["hoc_ky"]
     print(f"Học kì: {hk_id} ({hk_info.get('ten_hoc_ky', '')})")
 
+    # Lấy đối tượng (sinh viên/lớp) cho học kỳ này
+    doi_tuong = get_doi_tuong(hk_id)
+
     # Lấy khung giờ tiết trước
     tiet_map = get_tiet_map()
 
+    # Lấy TKB dạng học kỳ
+    tkb_data = get_tkb_hocky(hk_id, doi_tuong)
+
     os.makedirs("docs", exist_ok=True)
 
-    tkb_data = get_tkb_hocky(hk_id)
     with open(OUTPUT_TKB, "wb") as f:
         f.write(build_ics(tkb_data, hk_info, tiet_map))
     print(f"Saved: {OUTPUT_TKB}")
