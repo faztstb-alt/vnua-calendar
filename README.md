@@ -91,3 +91,5 @@ Lưu ý: khoá chỉ chặn `sync()` patch, **không** chặn `cleanup()` xoá (
 - GAS quota: ~50,000 URL fetch + ~20,000 Calendar API write/ngày
 - Nếu bị rate limit: tăng `Utilities.sleep()` trong GAS
 - Không chia sẻ `SCHOOL_PASS` hoặc Calendar ID công khai
+
+Cảm ơn Claude Sonnet 4.6 và Kimi K2.6 đã tài trợ :D
