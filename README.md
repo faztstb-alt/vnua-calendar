@@ -9,13 +9,14 @@
 3. GitHub Actions tự động chạy → tạo file `.ics` trong `docs/`
 4. Vào Google Calendar → Add calendar → From URL
 5. Dán URL:
-   ```
-   https://YOUR_USERNAME.github.io/vnua-calendar/schedule.ics
-   https://YOUR_USERNAME.github.io/vnua-calendar/exams.ics
-   ```
 
-**Ưu điểm:** Dễ setup, không cần server
-**Nhược điểm:** Google Calendar tự động refresh chậm (12-24h), không sửa event được
+```
+https://YOUR_USERNAME.github.io/vnua-calendar/schedule.ics
+https://YOUR_USERNAME.github.io/vnua-calendar/exams.ics
+```
+
+**Ưu điểm:** dễ setup, không cần server.
+**Nhược điểm:** Google Calendar tự refresh chậm (12–24h), không sửa event được, không có cơ chế khoá event.
 
 ## Cách 2: Google Apps Script (Realtime, có thể sửa event)
 
@@ -26,51 +27,63 @@ Giống Cách 1. Đảm bảo Actions chạy thành công, file `.ics` đã lên
 ### Bước 2: Tạo calendar con trong Google Calendar
 
 1. Google Calendar web → bên trái → `+` → **Create new calendar**
-2. Tạo 2 calendar:
-   - `VNUA Học` (cho TKB)
-   - `VNUA Thi` (cho lịch thi)
-3. Vào Settings của từng calendar → copy **Calendar ID** (dạng `...@group.calendar.google.com`)
+2. Tạo 2 calendar: `VNUA Học` (TKB), `VNUA Thi` (lịch thi)
+3. Vào Settings từng calendar → copy **Calendar ID** (`...@group.calendar.google.com`)
 
 ### Bước 3: Bật Google Calendar API
 
-1. Vào [Google Cloud Console](https://console.cloud.google.com/) → project của bạn
+1. [Google Cloud Console](https://console.cloud.google.com/) → project của bạn
 2. APIs & Services → Library → tìm **Google Calendar API** → Enable
 3. Hoặc trong GAS: Extensions → Google Calendar API → toggle ON
 
 ### Bước 4: Deploy GAS
 
-1. Vào [script.google.com](https://script.google.com) → New project
-2. Copy code từ file `sync-vnua.gs` trong repo này
+1. [script.google.com](https://script.google.com) → New project
+2. Copy code từ file `sync-vnua.gs` trong repo
 3. Sửa `CONFIG`:
-   ```javascript
-   SCHEDULE_CALENDAR_ID: 'YOUR_SCHEDULE_CALENDAR_ID@group.calendar.google.com',
-   EXAM_CALENDAR_ID: 'YOUR_EXAM_CALENDAR_ID@group.calendar.google.com',
-   ```
+
+```js
+SCHEDULE_CALENDAR_ID: 'YOUR_SCHEDULE_CALENDAR_ID@group.calendar.google.com',
+EXAM_CALENDAR_ID: 'YOUR_EXAM_CALENDAR_ID@group.calendar.google.com',
+```
+
 4. Chạy `setup()` → cấp quyền Calendar API
 5. Chạy `sync()` lần đầu
 
-### Bước 5: Sync khi có TKB mới
+### Bước 5: Sync khi có TKB mới hoặc kỳ mới
 
-Mỗi khi VNUA cập nhật TKB (đầu học kỳ):
+Mỗi khi VNUA cập nhật TKB (đầu kỳ, kỳ overlap với kỳ trước):
+
 1. Đợi GitHub Actions chạy xong (hoặc trigger manual)
-2. Vào GAS → chạy `cleanup()` → xóa event cũ
-3. Chạy `sync()` → tạo event mới
+2. GAS → chạy `sync()`
+
+Đủ. **Không cần chạy `cleanup()`.**
+
+Lý do: UID mỗi buổi học là hash deterministic từ `ma_mon|nhom|thu|tbd|week_num|hk_id`. VNUA không đổi data sau publish → UID không đổi giữa các lần sync. `sync()` tự match UID cũ → giữ nguyên (`kept`) hoặc update field đổi (`updated`), chỉ insert mới (`created`) cho buổi chưa có UID. Kỳ rớt khỏi cửa sổ 2-kỳ-gần-nhất của scraper vẫn giữ nguyên trên Calendar, không bị xoá.
+
+### Khi nào mới cần `cleanup()`
+
+Chỉ chạy khi cần **reset toàn bộ**: đổi format UID, đổi `TAG_UID`, hoặc data bị lỗi cần build lại từ đầu.
+
+⚠️ **Cảnh báo:** `cleanup()` (= `deleteAllTagged()`) xoá **mọi** event có tag UID, **kể cả event đã khoá bằng `!`**. Code hiện tại không check `lockedUids` trong hàm xoá — chỉ `sync()` mới tôn trọng khoá. Sửa tay + khoá rồi chạy `cleanup()` → mất event đó vĩnh viễn.
 
 ### Event Lock
 
-Sửa title event trên Google Calendar, thêm `!` bất kỳ đâu → event đó sẽ không bị `cleanup()` xóa và không bị `sync()` ghi đè.
+Sửa title event trên Google Calendar, thêm `!` bất kỳ đâu → event đó không bị `sync()` ghi đè nội dung.
 
 Ví dụ: `THI: Toán!` hoặc `!LT Nhập môn`
 
+Lưu ý: khoá chỉ chặn `sync()` patch, **không** chặn `cleanup()` xoá (xem cảnh báo trên).
+
 ## File trong repo
 
-| File | Mô tả |
-|------|-------|
-| `scraper.py` | Script Python fetch TKB + lịch thi từ VNUA |
-| `.github/workflows/sync.yml` | GitHub Actions cron |
-| `docs/schedule.ics` | TKB output |
-| `docs/exams.ics` | Lịch thi output |
-| `sync-vnua.gs` | Google Apps Script (để trong GAS, không chạy local) |
+| File                         | Mô tả                                          |
+| ----------------------------- | ----------------------------------------------- |
+| `scraper.py`                  | Script Python fetch TKB + lịch thi từ VNUA      |
+| `sync-vnua.gs`                | Google Apps Script — paste vào script.google.com, không tự chạy từ repo |
+| `.github/workflows/sync.yml`  | GitHub Actions cron                             |
+| `docs/schedule.ics`           | TKB output                                      |
+| `docs/exams.ics`              | Lịch thi output                                 |
 
 ## Lưu ý
 
