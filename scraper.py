@@ -338,6 +338,10 @@ if __name__ == "__main__":
     ds_hk = get_hocky_list()
     print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
 
+    # CHỈ LẤY 2 HỌC KỲ GẦN NHẤT
+    ds_hk = sorted(ds_hk, key=lambda h: h['hoc_ky'], reverse=True)[:2]
+    print(f"Sync {len(ds_hk)} học kỳ gần nhất: {[h['hoc_ky'] for h in ds_hk]}")
+
     all_tkb_entries = []
     all_exams = []
 
