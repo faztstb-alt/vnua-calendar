@@ -160,7 +160,9 @@ def build_ics(all_entries, cal_name):
             hk_id = hk_info.get("hoc_ky", "unknown")
             per_hk[hk_id] = 0
 
-            for tkb in tkb_list:
+            seen_uids = set()
+
+    for tkb in tkb_list:
                 bitmap = str(tkb.get("tkb", "")).strip()
                 if not bitmap:
                     continue
@@ -214,6 +216,10 @@ def build_ics(all_entries, cal_name):
                     uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
                     uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
+                    if uid in seen_uids:
+                        continue
+                    seen_uids.add(uid)
+
                     ev = Event()
                     ev.add("dtstamp", now_utc)
                     ev.add("uid", uid)
@@ -254,6 +260,8 @@ def build_exam_ics(all_exams):
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
     per_hk = {}
+
+    seen_uids = set()
 
     for thi in all_exams:
         try:
@@ -303,6 +311,10 @@ def build_exam_ics(all_exams):
             uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{tu_gio}|{hk_id}"
             uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
 
+            if uid in seen_uids:
+                continue
+            seen_uids.add(uid)
+
             desc_parts = []
             if thi.get("hinh_thuc_thi"): desc_parts.append(f"Hình thức: {thi['hinh_thuc_thi']}")
             if phong_str:                desc_parts.append(phong_str)
@@ -337,14 +349,6 @@ if __name__ == "__main__":
 
     ds_hk = get_hocky_list()
     print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
-
-    # LOẠI BỎ HỌC KỲ 3 (học kỳ có mã kết thúc bằng số 3)
-    ds_hk = [h for h in ds_hk if str(h['hoc_ky'])[-1] != '3']
-    print(f"After removing HK3: {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
-
-    # CHỈ LẤY 2 HỌC KỲ GẦN NHẤT (sau khi loại HK3)
-    ds_hk = sorted(ds_hk, key=lambda h: h['hoc_ky'], reverse=True)[:2]
-    print(f"Sync {len(ds_hk)} học kỳ gần nhất: {[h['hoc_ky'] for h in ds_hk]}")
 
     all_tkb_entries = []
     all_exams = []
