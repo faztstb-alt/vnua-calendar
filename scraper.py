@@ -338,7 +338,11 @@ if __name__ == "__main__":
     ds_hk = get_hocky_list()
     print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
 
-    # CHỈ LẤY 2 HỌC KỲ GẦN NHẤT
+    # LOẠI BỎ HỌC KỲ 3 (học kỳ có mã kết thúc bằng số 3)
+    ds_hk = [h for h in ds_hk if str(h['hoc_ky'])[-1] != '3']
+    print(f"After removing HK3: {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
+
+    # CHỈ LẤY 2 HỌC KỲ GẦN NHẤT (sau khi loại HK3)
     ds_hk = sorted(ds_hk, key=lambda h: h['hoc_ky'], reverse=True)[:2]
     print(f"Sync {len(ds_hk)} học kỳ gần nhất: {[h['hoc_ky'] for h in ds_hk]}")
 
