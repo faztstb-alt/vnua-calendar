@@ -312,7 +312,8 @@ def build_exam_ics(all_exams):
             ev = Event()
             ev.add("dtstamp", now_utc)
             ev.add("uid", uid)
-            ev.add("summary", f"🔴 THI: {ten_mon}")
+            # Đã xoá icon 🔴, chỉ để "THI: tên môn"
+            ev.add("summary", f"THI: {ten_mon}")
             ev.add("dtstart", dt_start)
             ev.add("dtend", dt_end)
             ev.add("location", phong_str)
