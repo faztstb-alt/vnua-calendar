@@ -1,50 +1,26 @@
 """
-VNUA Schedule → Google Calendar (.ics)
+VNUA Schedule → Google Calendar (.ics + .json)
+
 pip install requests icalendar
 """
 
 import os, json, base64, uuid, hashlib
-import requests
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from icalendar import Calendar, Event, Timezone, TimezoneStandard
+from icalendar import Calendar, Event
+import requests
 
-BASE_URL    = "https://daotao.vnua.edu.vn"
-USERNAME    = os.environ.get("SCHOOL_USER", "")
-PASSWORD    = os.environ.get("SCHOOL_PASS", "")
-OUTPUT_TKB  = "docs/schedule.ics"
+BASE_URL = "https://daotao.vnua.edu.vn"
+USERNAME = os.environ.get("SCHOOL_USER", "")
+PASSWORD = os.environ.get("SCHOOL_PASS", "")
+
+OUTPUT_TKB = "docs/schedule.ics"
+OUTPUT_TKB_JSON = "docs/schedule.json"
 OUTPUT_EXAM = "docs/exams.ics"
 
-# Giờ bắt đầu mỗi tiết
-TIET_BAT_DAU = {
-    1: "07:00",  2: "07:55",  3: "08:50",  4: "09:55",  5: "10:50",
-    6: "12:45",  7: "13:40",  8: "14:35",  9: "15:40", 10: "16:35",
-    11: "18:00", 12: "18:55", 13: "19:50",
-}
-
-# Giờ kết thúc mỗi tiết
-TIET_KET_THUC = {
-    1: "07:50",  2: "08:45",  3: "09:40",  4: "10:45",  5: "11:40",
-    6: "13:35",  7: "14:30",  8: "15:25",  9: "16:30", 10: "17:25",
-    11: "18:50", 12: "19:45", 13: "20:40",
-}
-
 S = requests.Session()
-S.headers.update({
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-    "Referer": f"{BASE_URL}/public/",
-    "Origin": BASE_URL,
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "vi,en;q=0.9",
-    "DNT": "1",
-    "Idpc": "0",
-    "Priority": "u=1, i",
-    "Sec-Ch-Ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"',
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "same-origin",
-})
+S.headers.update({"User-Agent": "Mozilla/5.0", "Referer": BASE_URL})
+
 
 # ── Login ─────────────────────────────────────────────────────────────────────
 def login():
@@ -62,43 +38,41 @@ def login():
 
     location = resp.headers.get("Location", "")
     fragment = location.split("#")[-1]
-    query    = fragment.split("?")[-1]
-    params   = parse_qs(query)
+    query = fragment.split("?")[-1]
+    params = parse_qs(query)
     curr_b64 = params.get("CurrUser", [""])[0]
-
     curr_b64 += "=" * (-len(curr_b64) % 4)
-    user_data    = json.loads(base64.b64decode(curr_b64))
+    user_data = json.loads(base64.b64decode(curr_b64))
     access_token = user_data["access_token"]
 
     S.headers.update({
         "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json, text/plain, */*",
+        "Idpc": "0",
         "X-Requested-With": "XMLHttpRequest",
     })
     print("Login OK | Token:", access_token[:30], "...")
-    return user_data
+    return True
 
-# ── Lấy danh sách học kỳ ────────────────────────────────────────────────────
-def get_hocky_list():
-    resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={
-        "filter": {"is_tieng_anh": None},
+
+# ── Lấy học kì hiện tại ───────────────────────────────────────────────────────
+def get_current_hocky():
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdshockytkbuser", json={})
+    data = resp.json()["data"]
+    return data["hoc_ky_theo_ngay_hien_tai"]
+
+
+# ── Lấy TKB toàn học kì ───────────────────────────────────────────────────────
+def get_tkb(hoc_ky_id):
+    resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbtuanusertheohocky", json={
+        "filter": {"hoc_ky": hoc_ky_id, "ten_hoc_ky": ""},
         "additional": {
             "paging": {"limit": 100, "page": 1},
-            "ordering": [{"name": "hoc_ky", "order_type": 1}]
+            "ordering": [{"name": None, "order_type": None}]
         }
     })
-    return resp.json()["data"]["ds_hoc_ky"]
+    return resp.json()["data"]
 
-# ── Lấy TKB dạng học kỳ (bitmap) ──────────────────────────────────────────────
-def get_tkb_hocky(hoc_ky_id):
-    resp = S.post(f"{BASE_URL}/api/sch/w-locdstkbhockytheodoituong", json={
-        "hoc_ky": hoc_ky_id,
-        "loai_doi_tuong": 1,
-        "id_du_lieu": None,
-    })
-    data = resp.json().get("data", {})
-    ds = data.get("ds_nhom_to", []) if isinstance(data, dict) else []
-    print(f"  HK {hoc_ky_id}: {len(ds)} TKB items")
-    return ds
 
 # ── Lấy lịch thi ─────────────────────────────────────────────────────────────
 def get_exams(hoc_ky_id):
@@ -109,273 +83,182 @@ def get_exams(hoc_ky_id):
             "ordering": [{"name": None, "order_type": None}]
         }
     })
-    data = resp.json().get("data", {})
-    ds = data.get("ds_lich_thi") if isinstance(data, dict) else data
-    if isinstance(ds, int): ds = []
-    elif isinstance(ds, dict): ds = list(ds.values())
-    elif not isinstance(ds, list): ds = []
-    print(f"  HK {hoc_ky_id}: {len(ds)} exam items")
-    return ds
+    return resp.json()["data"]
 
-# ── Tạo VTIMEZONE component ───────────────────────────────────────────────────
-def make_vn_timezone():
-    """Tạo VTIMEZONE component cho Asia/Ho_Chi_Minh (UTC+7, không DST)"""
-    tz = Timezone()
-    tz.add("tzid", "Asia/Ho_Chi_Minh")
 
-    tzstd = TimezoneStandard()
-    tzstd.add("dtstart", datetime(1970, 1, 1, 0, 0, 0))
-    tzstd.add("tzoffsetfrom", timedelta(hours=7))
-    tzstd.add("tzoffsetto", timedelta(hours=7))
-    tzstd.add("tzname", "ICT")
-    tz.add_component(tzstd)
+# ── Gộp buổi học liên tiếp cùng lớp/phòng/tiết thành từng chuỗi tuần ──────────
+# key = 1 lớp học phần cố định (môn + nhóm + tiết bắt đầu/kết thúc + phòng).
+# runs: các đoạn ngày cách nhau đúng 7 ngày liên tục -> 1 RRULE weekly.
+# Đứt quãng (nghỉ lễ, nghỉ Tết...) tự tách thành chuỗi RRULE mới, không nối bậy.
+def _group_runs(data):
+    tiet_map = {t["tiet"]: (t["gio_bat_dau"], t["gio_ket_thuc"])
+                for t in data["ds_tiet_trong_ngay"]}
 
-    return tz
+    groups = defaultdict(list)
+    for tuan in data["ds_tuan_tkb"]:
+        for tkb in tuan["ds_thoi_khoa_bieu"]:
+            if tkb.get("is_nghi_day"):
+                continue
+            tiet_bd = tkb["tiet_bat_dau"]
+            tiet_kt = min(tiet_bd + tkb["so_tiet"] - 1, max(tiet_map.keys()))
+            if tiet_bd not in tiet_map:
+                continue
+            ngay = datetime.fromisoformat(tkb["ngay_hoc"]).date()
+            key = (tkb["ten_mon"], tkb["ma_nhom"], tiet_bd, tiet_kt, tkb["ma_phong"])
+            groups[key].append((ngay, tkb, tiet_bd, tiet_kt))
 
-# ── Build TKB .ics ──────────────────────────────────────────────────────────
-def build_ics(all_entries, cal_name):
+    all_runs = []  # list of (key, tiet_map, run=[(ngay, tkb, tiet_bd, tiet_kt), ...])
+    for key, items in groups.items():
+        items.sort(key=lambda x: x[0])
+        runs, run = [], [items[0]]
+        for prev, cur in zip(items, items[1:]):
+            if (cur[0] - prev[0]).days == 7:
+                run.append(cur)
+            else:
+                runs.append(run)
+                run = [cur]
+        runs.append(run)
+        for run in runs:
+            all_runs.append((key, run))
+
+    return tiet_map, all_runs
+
+
+def _stable_uid(hoc_ky_id, key, ngay0):
+    raw = str(hoc_ky_id) + "|" + "|".join(str(k) for k in key) + "|" + str(ngay0)
+    return hashlib.sha1(raw.encode()).hexdigest() + "@vnua-calendar"
+
+
+# ── Build TKB .ics (1 chuỗi RRULE weekly cho mỗi run liên tiếp) ──────────────
+def build_ics(data, hoc_ky_id):
+    tiet_map, all_runs = _group_runs(data)
+
     cal = Calendar()
     cal.add("prodid", "-//VNUA Schedule//VN")
     cal.add("version", "2.0")
-    cal.add("X-WR-CALNAME", cal_name)
+    cal.add("X-WR-CALNAME", "Lịch học VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
-    cal.add("METHOD", "PUBLISH")
-
-    cal.add_component(make_vn_timezone())
-
     now_utc = datetime.now(tz=timezone.utc)
-    total_count = 0
-    per_hk = {}
-    seen_uids = set()
+    n_series, n_occ = 0, 0
 
-    for entry in all_entries:
-        try:
-            tkb_list = entry.get("tkb_list", [])
-            hk_info  = entry.get("hk_info", {})
-            start_str = hk_info.get("ngay_bat_dau_hk", "")
-            if not start_str:
-                continue
+    for key, run in all_runs:
+        ngay0, tkb0, tiet_bd, tiet_kt = run[0]
+        dt_start = datetime.strptime(f"{ngay0} {tiet_map[tiet_bd][0]}", "%Y-%m-%d %H:%M")
+        dt_end = datetime.strptime(f"{ngay0} {tiet_map[tiet_kt][1]}", "%Y-%m-%d %H:%M")
+        phong = tkb0["ma_phong"].split("-")[0].strip()
 
-            start_date = datetime.strptime(start_str, "%d/%m/%Y").date()
-            monday_w1 = start_date - timedelta(days=start_date.weekday())
-            hk_id = hk_info.get("hoc_ky", "unknown")
-            per_hk[hk_id] = 0
+        ev = Event()
+        ev.add("dtstamp", now_utc)
+        ev.add("uid", _stable_uid(hoc_ky_id, key, ngay0))  # ổn định -> re-run update-in-place, không đẻ trùng
+        ev.add("summary", tkb0["ten_mon"])
+        ev.add("dtstart", dt_start)
+        ev.add("dtend", dt_end)
+        ev.add("location", phong)
+        ev.add("description", (
+            f"GV: {tkb0['ten_giang_vien']}\n"
+            f"{phong}\n"
+            f"Tiết {tiet_bd}–{tiet_kt} | Nhóm {tkb0['ma_nhom']}"
+        ))
+        if len(run) > 1:
+            ev.add("rrule", {"freq": "weekly", "count": len(run)})
+        cal.add_component(ev)
+        n_series += 1
+        n_occ += len(run)
 
-            for tkb in tkb_list:
-                bitmap = str(tkb.get("tkb", "")).strip()
-                if not bitmap:
-                    continue
-
-                thu = int(tkb.get("thu", 0))
-                if thu < 2 or thu > 8:
-                    continue
-
-                tbd_raw = tkb.get("tbd", 0)
-                so_tiet_raw = tkb.get("so_tiet", 0)
-                try:
-                    tbd = int(str(tbd_raw).strip())
-                    so_tiet = int(str(so_tiet_raw).strip())
-                except (ValueError, TypeError):
-                    continue
-
-                if tbd <= 0 or so_tiet <= 0:
-                    continue
-
-                tiet_kt = tbd + so_tiet - 1
-
-                if tbd not in TIET_BAT_DAU or tiet_kt not in TIET_KET_THUC:
-                    print(f"DEBUG SKIP: tbd={tbd} tiet_kt={tiet_kt} out of range")
-                    continue
-
-                tu_gio = TIET_BAT_DAU[tbd]
-                den_gio = TIET_KET_THUC[tiet_kt]
-
-                ten_mon = tkb.get("ten_mon", "Môn học")
-                phong = str(tkb.get("phong", "")).strip()
-                gv = tkb.get("gv", "") or tkb.get("ten_giang_vien", "")
-                nhom = tkb.get("nhom_to", "")
-                ma_mon = tkb.get("ma_mon", "")
-
-                dow_offset = thu - 2
-
-                for week_idx, char in enumerate(bitmap):
-                    if char == "-":
-                        continue
-
-                    week_num = week_idx + 1
-                    event_date = monday_w1 + timedelta(weeks=week_idx, days=dow_offset)
-
-                    dt_start = datetime.strptime(f"{event_date} {tu_gio}", "%Y-%m-%d %H:%M")
-                    dt_end   = datetime.strptime(f"{event_date} {den_gio}", "%Y-%m-%d %H:%M")
-
-                    vn_tz = timezone(timedelta(hours=7))
-                    dt_start = dt_start.replace(tzinfo=vn_tz)
-                    dt_end = dt_end.replace(tzinfo=vn_tz)
-
-                    uid_seed = f"{ma_mon}|{nhom}|{thu}|{tbd}|{week_num}|{hk_id}"
-                    uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
-
-                    if uid in seen_uids:
-                        continue
-                    seen_uids.add(uid)
-
-                    ev = Event()
-                    ev.add("dtstamp", now_utc)
-                    ev.add("uid", uid)
-                    ev.add("summary", ten_mon)
-                    ev.add("dtstart", dt_start)
-                    ev.add("dtend", dt_end)
-                    ev.add("location", phong)
-                    ev.add("description", (
-                        f"GV: {gv}\n"
-                        f"{phong}\n"
-                        f"Tiết {tbd}–{tiet_kt} | Nhóm {nhom}\n"
-                        f"Tuần {week_num} | HK {hk_id}"
-                    ))
-                    ev.add("sequence", 0)
-                    cal.add_component(ev)
-                    total_count += 1
-                    per_hk[hk_id] += 1
-
-        except Exception as e:
-            print(f"Skip entry: {e}")
-            continue
-
-    print(f"DEBUG TKB per HK: {per_hk}")
-    print(f"Total TKB: {total_count} sự kiện")
+    print(f"TKB: {n_series} chuỗi sự kiện (gộp từ {n_occ} buổi học)")
     return cal.to_ical()
 
+
+# ── Build TKB .json (Apps Script đọc cái này để tạo event, khỏi tự parse RRULE) ─
+def build_schedule_json(data, hoc_ky_id):
+    tiet_map, all_runs = _group_runs(data)
+    series = []
+    for key, run in all_runs:
+        ngay0, tkb0, tiet_bd, tiet_kt = run[0]
+        phong = tkb0["ma_phong"].split("-")[0].strip()
+        series.append({
+            "mon": tkb0["ten_mon"],
+            "nhom": tkb0["ma_nhom"],
+            "phong": phong,
+            "giang_vien": tkb0["ten_giang_vien"],
+            "tiet": f"{tiet_bd}-{tiet_kt}",
+            "start_date": str(ngay0),
+            "start_time": tiet_map[tiet_bd][0],
+            "end_time": tiet_map[tiet_kt][1],
+            "weeks": len(run),
+            "uid": _stable_uid(hoc_ky_id, key, ngay0),
+        })
+    return json.dumps({"hoc_ky": hoc_ky_id, "series": series}, ensure_ascii=False, indent=2)
+
+
 # ── Build Exam .ics ───────────────────────────────────────────────────────────
-def build_exam_ics(all_exams):
+def build_exam_ics(data):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Exams//VN")
     cal.add("version", "2.0")
     cal.add("X-WR-CALNAME", "Lịch thi VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
-    cal.add("METHOD", "PUBLISH")
-
-    cal.add_component(make_vn_timezone())
-
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
-    per_hk = {}
-    seen_uids = set()
 
-    for thi in all_exams:
+    ds = data.get("ds_lich_thi") or data.get("data") or data
+    if isinstance(ds, dict):
+        ds = list(ds.values())[0]
+
+    for thi in ds:
         try:
-            ngay_thi  = thi.get("ngay_thi") or thi.get("ngay")
-            gio_bd    = thi.get("gio_bat_dau") or thi.get("gio_thi") or "07:00"
-            ten_mon   = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
+            ngay_thi = thi.get("ngay_thi") or thi.get("ngay")
+            gio_bd = thi.get("gio_bat_dau") or thi.get("gio_thi") or "00:00"
+            ten_mon = thi.get("ten_mon") or thi.get("mon_hoc") or "Thi"
             phong_thi = thi.get("phong_thi") or thi.get("ma_phong") or ""
             phong_str = phong_thi.split("-")[0].strip() if phong_thi else ""
-            hk_id     = thi.get("hoc_ky", "unknown")
-
-            # Lấy tiết bắt đầu và số tiết thi (mặc định 2 tiết nếu không có)
-            tbd_raw = thi.get("tiet_bat_dau", 1) or thi.get("tbd", 1)
-            so_tiet_raw = thi.get("so_tiet", 2) or 2
-            try:
-                tbd = int(str(tbd_raw).strip())
-                so_tiet = int(str(so_tiet_raw).strip())
-            except (ValueError, TypeError):
-                tbd = 1
-                so_tiet = 2
-
-            tiet_kt = tbd + so_tiet - 1
-
-            # Giới hạn trong khoảng tiết hợp lệ
-            if tbd < 1: tbd = 1
-            if tiet_kt > 13: tiet_kt = 13
-            if tiet_kt < tbd: tiet_kt = tbd
-
-            if hk_id not in per_hk:
-                per_hk[hk_id] = 0
-
-            if not ngay_thi:
-                continue
 
             ngay = datetime.strptime(ngay_thi, "%d/%m/%Y").date()
-
-            # Dùng bảng tiết giống TKB
-            tu_gio = TIET_BAT_DAU.get(tbd, "07:00")
-            den_gio = TIET_KET_THUC.get(tiet_kt, "09:40")
-
-            dt_start = datetime.strptime(f"{ngay} {tu_gio}", "%Y-%m-%d %H:%M")
-            dt_end   = datetime.strptime(f"{ngay} {den_gio}", "%Y-%m-%d %H:%M")
-
-            vn_tz = timezone(timedelta(hours=7))
-            dt_start = dt_start.replace(tzinfo=vn_tz)
-            dt_end = dt_end.replace(tzinfo=vn_tz)
-
-            uid_seed = f"EXAM|{ten_mon}|{ngay_thi}|{tu_gio}|{hk_id}"
-            uid = hashlib.md5(uid_seed.encode()).hexdigest() + "@vnua.edu.vn"
-
-            if uid in seen_uids:
-                continue
-            seen_uids.add(uid)
+            dt_start = datetime.strptime(f"{ngay} {gio_bd[:5]}", "%Y-%m-%d %H:%M")
+            dt_end = dt_start + timedelta(minutes=int(thi.get("so_phut", 60)))
 
             desc_parts = []
-            if thi.get("hinh_thuc_thi"): desc_parts.append(f"Hình thức: {thi['hinh_thuc_thi']}")
-            if phong_str:                desc_parts.append(phong_str)
-            desc_parts.append(f"Tiết {tbd}–{tiet_kt}")
-            desc_parts.append(f"HK {hk_id}")
+            if thi.get("hinh_thuc_thi"):
+                desc_parts.append(f"Hình thức: {thi['hinh_thuc_thi']}")
+            if phong_str:
+                desc_parts.append(phong_str)
 
             ev = Event()
             ev.add("dtstamp", now_utc)
-            ev.add("uid", uid)
-            # Đã xoá icon 🔴, chỉ để "THI: tên môn"
-            ev.add("summary", f"THI: {ten_mon}")
+            ev.add("uid", str(uuid.uuid4()))
+            ev.add("summary", f"🔴 THI: {ten_mon}")
             ev.add("dtstart", dt_start)
             ev.add("dtend", dt_end)
             ev.add("location", phong_str)
             ev.add("description", "\n".join(desc_parts))
-            ev.add("sequence", 0)
             cal.add_component(ev)
             count += 1
-            per_hk[hk_id] += 1
         except Exception as e:
-            print(f"Skip exam entry: {e}")
+            print(f"Skip exam entry: {e} | data: {thi}")
 
-    print(f"DEBUG Exam per HK: {per_hk}")
-    print(f"Total Lịch thi: {count} sự kiện")
+    print(f"Lịch thi: {count} sự kiện")
     return cal.to_ical()
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    user_data = login()
-    if not user_data:
-        raise SystemExit("Login thất bại")
+    assert login(), "Login thất bại"
 
-    ds_hk = get_hocky_list()
-    print(f"Found {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
-
-    # LOẠI BỎ HỌC KỲ 3 (học kỳ có mã kết thúc bằng số 3)
-    ds_hk = [h for h in ds_hk if str(h['hoc_ky'])[-1] != '3']
-    print(f"After removing HK3: {len(ds_hk)} học kỳ: {[h['hoc_ky'] for h in ds_hk]}")
-
-    # CHỈ LẤY 2 HỌC KỲ GẦN NHẤT (sau khi loại HK3)
-    ds_hk = sorted(ds_hk, key=lambda h: h['hoc_ky'], reverse=True)[:2]
-    print(f"Sync {len(ds_hk)} học kỳ gần nhất: {[h['hoc_ky'] for h in ds_hk]}")
-
-    all_tkb_entries = []
-    all_exams = []
-
-    for hk in ds_hk:
-        hk_id = hk["hoc_ky"]
-        print(f"\nFetching HK {hk_id} ({hk.get('ten_hoc_ky','')})...")
-
-        tkb_list = get_tkb_hocky(hk_id)
-        if tkb_list:
-            all_tkb_entries.append({"hk_info": hk, "tkb_list": tkb_list})
-
-        exams = get_exams(hk_id)
-        all_exams.extend(exams)
+    hk_id = get_current_hocky()
+    print(f"Học kì: {hk_id}")
 
     os.makedirs("docs", exist_ok=True)
 
+    tkb_data = get_tkb(hk_id)
     with open(OUTPUT_TKB, "wb") as f:
-        f.write(build_ics(all_tkb_entries, "Lịch học VNUA"))
-    print(f"\nSaved: {OUTPUT_TKB}")
+        f.write(build_ics(tkb_data, hk_id))
+    print(f"Saved: {OUTPUT_TKB}")
 
+    with open(OUTPUT_TKB_JSON, "w", encoding="utf-8") as f:
+        f.write(build_schedule_json(tkb_data, hk_id))
+    print(f"Saved: {OUTPUT_TKB_JSON}")
+
+    exam_data = get_exams(hk_id)
     with open(OUTPUT_EXAM, "wb") as f:
-        f.write(build_exam_ics(all_exams))
+        f.write(build_exam_ics(exam_data))
     print(f"Saved: {OUTPUT_EXAM}")
