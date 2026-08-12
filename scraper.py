@@ -4,7 +4,7 @@ VNUA Schedule → Google Calendar (.ics + .json)
 pip install requests icalendar
 """
 
-import os, json, base64, uuid, hashlib
+import os, json, base64, hashlib
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from icalendar import Calendar, Event
@@ -211,9 +211,10 @@ def build_exam_ics(data, hoc_ky_id):
             if phong_str:
                 desc_parts.append(phong_str)
 
+            key = (ten_mon, phong_str, ngay_thi, gio_bd)
             ev = Event()
             ev.add("dtstamp", now_utc)
-            ev.add("uid", str(uuid.uuid4()))
+            ev.add("uid", _stable_uid(hoc_ky_id, key, ngay_thi))
             ev.add("summary", f"🔴 THI: {ten_mon}")
             ev.add("dtstart", dt_start)
             ev.add("dtend", dt_end)
