@@ -15,7 +15,6 @@ USERNAME = os.environ.get("SCHOOL_USER", "")
 PASSWORD = os.environ.get("SCHOOL_PASS", "")
 
 OUTPUT_TKB = "docs/schedule.ics"
-OUTPUT_TKB_JSON = "docs/schedule.json"
 OUTPUT_EXAM = "docs/exams.ics"
 
 S = requests.Session()
@@ -138,6 +137,7 @@ def build_ics(data, hoc_ky_id):
     cal.add("version", "2.0")
     cal.add("X-WR-CALNAME", "Lịch học VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
+    cal.add("X-HOCKY", str(hoc_ky_id))  # Apps Script đọc field này để gate sync-1-lần/học-kì
     now_utc = datetime.now(tz=timezone.utc)
     n_series, n_occ = 0, 0
 
@@ -169,35 +169,14 @@ def build_ics(data, hoc_ky_id):
     return cal.to_ical()
 
 
-# ── Build TKB .json (Apps Script đọc cái này để tạo event, khỏi tự parse RRULE) ─
-def build_schedule_json(data, hoc_ky_id):
-    tiet_map, all_runs = _group_runs(data)
-    series = []
-    for key, run in all_runs:
-        ngay0, tkb0, tiet_bd, tiet_kt = run[0]
-        phong = tkb0["ma_phong"].split("-")[0].strip()
-        series.append({
-            "mon": tkb0["ten_mon"],
-            "nhom": tkb0["ma_nhom"],
-            "phong": phong,
-            "giang_vien": tkb0["ten_giang_vien"],
-            "tiet": f"{tiet_bd}-{tiet_kt}",
-            "start_date": str(ngay0),
-            "start_time": tiet_map[tiet_bd][0],
-            "end_time": tiet_map[tiet_kt][1],
-            "weeks": len(run),
-            "uid": _stable_uid(hoc_ky_id, key, ngay0),
-        })
-    return json.dumps({"hoc_ky": hoc_ky_id, "series": series}, ensure_ascii=False, indent=2)
-
-
 # ── Build Exam .ics ───────────────────────────────────────────────────────────
-def build_exam_ics(data):
+def build_exam_ics(data, hoc_ky_id):
     cal = Calendar()
     cal.add("prodid", "-//VNUA Exams//VN")
     cal.add("version", "2.0")
     cal.add("X-WR-CALNAME", "Lịch thi VNUA")
     cal.add("X-WR-TIMEZONE", "Asia/Ho_Chi_Minh")
+    cal.add("X-HOCKY", str(hoc_ky_id))
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
 
@@ -254,11 +233,7 @@ if __name__ == "__main__":
         f.write(build_ics(tkb_data, hk_id))
     print(f"Saved: {OUTPUT_TKB}")
 
-    with open(OUTPUT_TKB_JSON, "w", encoding="utf-8") as f:
-        f.write(build_schedule_json(tkb_data, hk_id))
-    print(f"Saved: {OUTPUT_TKB_JSON}")
-
     exam_data = get_exams(hk_id)
     with open(OUTPUT_EXAM, "wb") as f:
-        f.write(build_exam_ics(exam_data))
+        f.write(build_exam_ics(exam_data, hk_id))
     print(f"Saved: {OUTPUT_EXAM}")
