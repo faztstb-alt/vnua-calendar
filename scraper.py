@@ -180,9 +180,18 @@ def build_exam_ics(data, hoc_ky_id):
     now_utc = datetime.now(tz=timezone.utc)
     count = 0
 
-    ds = data.get("ds_lich_thi") or data.get("data") or data
-    if isinstance(ds, dict):
-        ds = list(ds.values())[0]
+    ds = None
+    if isinstance(data, dict):
+        ds = data.get("ds_lich_thi") or data.get("data") or data
+        if isinstance(ds, dict):
+            ds = list(ds.values())[0] if ds else []
+
+    if not isinstance(ds, list):
+        # học kì mới chưa có lịch thi -> API trả shape khác list (vd: 0, None, {}).
+        # coi như 0 lịch thi, không crash cả script.
+        print(f"Lịch thi: data không phải list (raw type={type(data).__name__}, "
+              f"resolved type={type(ds).__name__}) -> coi như chưa có lịch thi.")
+        ds = []
 
     for thi in ds:
         try:
